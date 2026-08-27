@@ -37,13 +37,13 @@ Set these environment variables in the container or Quadlet environment file:
 Build the image:
 
 ```bash
-podman build -f Containerfile -t ghcr.io/<owner>/<repo>:latest .
+podman build -f Containerfile -t ghcr.io/bruglet/twitterapis-mcp:latest .
 ```
 
 Run the image with an environment file:
 
 ```bash
-podman run --rm --env-file "$HOME/.config/twitterapis-mcp/twitterapis-mcp.env" -p 127.0.0.1:3000:3000 ghcr.io/<owner>/<repo>:latest
+podman run --rm --env-file "$HOME/.config/twitterapis-mcp/twitterapis-mcp.env" -p 127.0.0.1:3000:3000 ghcr.io/bruglet/twitterapis-mcp:latest
 ```
 
 The image uses Node 24, runs as the non-root `node` user, and includes a health check for `/healthz`. Do not put secrets in the image.
@@ -74,7 +74,7 @@ The unit uses `AutoUpdate=registry`, restarts after a failure, and loads secrets
 GitHub Actions publishes the image at:
 
 ```text
-ghcr.io/<owner>/<repo>
+ghcr.io/bruglet/twitterapis-mcp
 ```
 
 The workflow publishes `latest` and `sha-<commit>` for `main`. It also publishes the matching version tag for a version-tag push.

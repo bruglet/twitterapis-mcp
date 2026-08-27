@@ -4,8 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-# Replace <owner>/<repo> with the GitHub repository path before installation.
-Image=ghcr.io/<owner>/<repo>:latest
+Image=ghcr.io/bruglet/twitterapis-mcp:latest
 ContainerName=twitterapis-mcp
 AutoUpdate=registry
 EnvironmentFile=%h/.config/twitterapis-mcp/twitterapis-mcp.env
