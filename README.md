@@ -1,99 +1,89 @@
-# @twitterapis/mcp
+# TwitterAPIs Remote MCP
 
-[![npm version](https://img.shields.io/npm/v/@twitterapis/mcp)](https://www.npmjs.com/package/@twitterapis/mcp)
-[![npm downloads](https://img.shields.io/npm/dm/@twitterapis/mcp)](https://www.npmjs.com/package/@twitterapis/mcp)
-[![license](https://img.shields.io/npm/l/@twitterapis/mcp)](./LICENSE)
+This fork runs the [twitterapis.com](https://www.twitterapis.com) API as a remote Model Context Protocol service. It keeps the upstream TwitterAPIs tools, schemas, and REST behavior.
 
-Official **Model Context Protocol** server for [twitterapis.com](https://www.twitterapis.com), the Twitter / X API as native tools for Claude, Cursor, Windsurf, and any MCP client. Reads (search, profiles, timelines, followers, DMs) plus write actions (post, like, retweet, follow).
+## Remote MCP
 
-Ask your agent to search tweets, pull a user's profile or timeline, list followers/following, fetch thread context, or enumerate list members and it calls the API directly. Every tool maps to a REST endpoint at `https://api.twitterapis.com`; the server holds no state and forwards your API key on each call.
+Use the remote MCP URL with the `/mcp` path:
 
-## Quick start
-
-No install needed. Run with `npx`. You need one thing: an API key (free $0.50 in credits, no card required): **[twitterapis.com/signup](https://www.twitterapis.com/signup)**.
-
-## Setup
-
-### Claude Desktop
-
-Edit `claude_desktop_config.json` (Settings → Developer → Edit Config):
-
-```json
-{
-  "mcpServers": {
-    "twitterapis": {
-      "command": "npx",
-      "args": ["-y", "@twitterapis/mcp@latest"],
-      "env": { "TWITTERAPIS_KEY": "YOUR_API_KEY" }
-    }
-  }
-}
+```text
+https://<your-host>/mcp
 ```
 
-Restart Claude Desktop. The `twitter_*` tools appear in the tool picker.
+Cloudflare Access handles OAuth before the request reaches this service. The origin validates the `Cf-Access-Jwt-Assertion` header. This service does not implement OAuth.
 
-### Cursor
+The public health endpoint is:
 
-`~/.cursor/mcp.json` (or Settings → MCP → Add New Server):
-
-```json
-{
-  "mcpServers": {
-    "twitterapis": {
-      "command": "npx",
-      "args": ["-y", "@twitterapis/mcp@latest"],
-      "env": { "TWITTERAPIS_KEY": "YOUR_API_KEY" }
-    }
-  }
-}
-```
-
-### Windsurf
-
-`~/.codeium/windsurf/mcp_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "twitterapis": {
-      "command": "npx",
-      "args": ["-y", "@twitterapis/mcp@latest"],
-      "env": { "TWITTERAPIS_KEY": "YOUR_API_KEY" }
-    }
-  }
-}
-```
-
-### VS Code (Copilot / agent mode)
-
-`.vscode/mcp.json` in your workspace, or the user-level MCP settings:
-
-```json
-{
-  "servers": {
-    "twitterapis": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@twitterapis/mcp@latest"],
-      "env": { "TWITTERAPIS_KEY": "YOUR_API_KEY" }
-    }
-  }
-}
+```text
+https://<your-host>/healthz
 ```
 
 ## Configuration
 
-| Env var | Required | Default | Purpose |
+Set these environment variables in the container or Quadlet environment file:
+
+| Environment variable | Required | Default | Purpose |
 |---|---|---|---|
-| `TWITTERAPIS_KEY` | Yes | (none) | API key from [dashboard](https://www.twitterapis.com/dashboard) |
-| `TWITTERAPIS_BASE_URL` | No | `https://api.twitterapis.com` | Override the API host |
-| `TWITTERAPIS_TIMEOUT_MS` | No | `30000` | Per-request timeout in milliseconds |
+| `TWITTERAPIS_KEY` | Yes | None | API key from the [twitterapis.com dashboard](https://www.twitterapis.com/dashboard) |
+| `TWITTERAPIS_BASE_URL` | No | `https://api.twitterapis.com` | TwitterAPIs REST API host |
+| `TWITTERAPIS_TIMEOUT_MS` | No | `30000` | Request timeout in milliseconds |
+| `CF_ACCESS_TEAM_DOMAIN` | Yes | None | Cloudflare Access team URL, for example `https://example.cloudflareaccess.com` |
+| `CF_ACCESS_AUD` | Yes | None | Cloudflare Access application audience tag |
+| `HOST` | No | `0.0.0.0` | HTTP listen address |
+| `PORT` | No | `3000` | HTTP listen port |
+
+## Container
+
+Build the image:
+
+```bash
+podman build -f Containerfile -t ghcr.io/<owner>/<repo>:latest .
+```
+
+Run the image with an environment file:
+
+```bash
+podman run --rm --env-file "$HOME/.config/twitterapis-mcp/twitterapis-mcp.env" -p 127.0.0.1:3000:3000 ghcr.io/<owner>/<repo>:latest
+```
+
+The image uses Node 24, runs as the non-root `node` user, and includes a health check for `/healthz`. Do not put secrets in the image.
+
+## Rootless Quadlet
+
+The Quadlet publishes port `3000` on host loopback only. Cloudflare Tunnel connects to `http://127.0.0.1:3000`.
+
+Copy the unit and create its environment file:
+
+```bash
+mkdir -p ~/.config/containers/systemd ~/.config/twitterapis-mcp
+cp deploy/twitterapis-mcp.container ~/.config/containers/systemd/
+cp deploy/twitterapis-mcp.env.example ~/.config/twitterapis-mcp/twitterapis-mcp.env
+```
+
+Edit the environment file. Then load and start the rootless unit:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now twitterapis-mcp.service
+```
+
+The unit uses `AutoUpdate=registry`, restarts after a failure, and loads secrets from the environment file.
+
+## GHCR image
+
+GitHub Actions publishes the image at:
+
+```text
+ghcr.io/<owner>/<repo>
+```
+
+The workflow publishes `latest` and `sha-<commit>` for `main`. It also publishes the matching version tag for a version-tag push.
 
 ## Tools
 
 94 tools: 60 reads and 34 write actions. Most user endpoints accept `username` (handle without @) **or** `user_id` (`twitter_user_likes` and `twitter_user_tweets_complete` require `user_id`); tweet endpoints accept `id` **or** `url`; paginated endpoints return a `cursor` you pass back to get the next page. Two of the reads are free account/billing lookups (`twitter_account_me`, `twitter_account_payments`); the 14 monitoring tools are also free (account administration, not metered reads).
 
-Public reads (search, profiles, tweets, followers, likes) work with just your API key. The **account-only** reads (bookmarks, DMs, home timeline, followers-you-know) and **most write actions** act AS an authenticated X account, so they need a session linked to your key first (returns HTTP 409 until then). Link a session either by registering your x.com cookies (`twitter_customer_session`) or by logging in with a username/password (`twitter_user_login`). Alternatively, pass **per-call inline credentials** on any of those tools (`auth_token` + `ct0`, with optional `proxy_url` / `user_agent`) to act AS that account for a single call without pre-registering a session, so one API key can act as many accounts. For write actions, set `proxy_url` to a residential proxy, since X soft-blocks writes that egress from datacenter IPs. Each write tool is annotated `readOnlyHint: false`; reversing actions (delete, unfollow, unlike, unretweet, unbookmark, monitor/webhook delete) are annotated `destructiveHint: true` so MCP clients can prompt before running them. The **monitoring** tools (see below) are the one exception: they administer your twitterapis.com account, not an X session, so they need only your API key, no linked session and no inline credentials.
+Public read tools work with just your API key. Account-only reads and 34 write actions usually require a linked X session or per-call credentials. The monitoring tools administer your twitterapis.com account and need only your API key. Each write tool is annotated `readOnlyHint: false`; reversing actions are annotated `destructiveHint: true`.
 
 ### Reads
 
@@ -215,102 +205,16 @@ Link an X account to your key once, so the account-only reads and write actions 
 | `twitter_customer_session_delete` | Revoke that stored session, deleting your `auth_token` + `ct0` from the service. Idempotent and free |
 | `twitter_user_login` | Log in with `username` + `password` (+ `totp_secret` for 2FA); stores the session against your key. Returns a confirmation, never the cookies |
 
-## Usage examples
+## Upstream attribution
 
-### Search for trending AI tweets
-
-> "Find the most popular tweets about AI agents posted this week"
-
-The agent calls `twitter_advanced_search` with:
-```
-query: "AI agents min_faves:200 since:2024-01-01"
-product: "Top"
-count: 20
-```
-
-### Pull a user's recent posts
-
-> "Get the last 10 tweets from @sama"
-
-The agent calls `twitter_user_tweets` with:
-```
-username: "sama"
-count: 10
-```
-
-### Read a full thread
-
-> "Get the full thread for this tweet: https://x.com/karpathy/status/1849....."
-
-The agent calls `twitter_tweet_thread` with:
-```
-url: "https://x.com/karpathy/status/1849....."
-```
-
-### Paginate through followers
-
-> "List the first 100 followers of @openai, then the next 100"
-
-First call, `twitter_user_followers`: `{ username: "openai", count: 100 }`
-Second call, pass back the `cursor` from the first response: `{ username: "openai", count: 100, cursor: "<cursor from response>" }`
-
-### Monitor brand mentions
-
-> "Show me recent tweets mentioning @twitterapis"
-
-The agent calls `twitter_user_mentions` with:
-```
-username: "twitterapis"
-count: 50
-```
-
-## Troubleshooting
-
-**`HTTP 401 (invalid or missing API key)`** Check that `TWITTERAPIS_KEY` is set correctly in your MCP client config and matches the key shown in your [dashboard](https://www.twitterapis.com/dashboard).
-
-**`HTTP 402 (insufficient credits)`** Top up at [twitterapis.com/dashboard](https://www.twitterapis.com/dashboard). Your first $0.50 is free at signup.
-
-**`HTTP 403 (access forbidden)`** The account or tweet may be private/protected, or your plan does not include this endpoint.
-
-**`HTTP 404 (not found)`** The user, tweet, or list may have been deleted, suspended, or the id/handle is wrong.
-
-**`HTTP 429 (rate limited)`** Wait a few seconds and retry. If you hit this frequently, add `"TWITTERAPIS_TIMEOUT_MS": "60000"` to your env config and space out bulk requests.
-
-**`Request failed: timed out after 30000ms`** The default timeout is 30 s. For large paginated fetches set `TWITTERAPIS_TIMEOUT_MS` to a higher value (e.g. `60000`).
-
-**Tools do not appear in Claude / Cursor** Ensure `npx` is on your PATH and Node.js 18+ is installed (`node --version`). Check MCP client logs for startup errors.
-
-## Pricing
-
-Calls are billed to your twitterapis.com account. Almost every endpoint is $0.0008/call: all reads (search, profiles, tweets, followers, likes) plus the simple write actions (like, retweet, bookmark, follow and their undos, delete). At the read rate that works out to $0.04 per 1,000 tweets, since each call returns about 20 tweets. The premium endpoints cost a little more: tweet creation, sending a DM (`twitter_dm_send`), and DM reads (`twitter_dm_list`, `twitter_dm_conversation`) at $0.0016/call, full tweet history (`twitter_user_tweets_complete`) at $0.0024/call, a full tweet thread (`twitter_tweet_thread`) and a Grok answer (`twitter_grok_chat`) at $0.004/call, and the article-editing writes (`twitter_article_create`, `twitter_article_update_title`, `twitter_article_update_cover_media`, `twitter_article_update_content`, `twitter_article_publish`, `twitter_article_unpublish`) at $0.0016/call (`twitter_article_get`, `twitter_article_list`, and `twitter_article_delete` stay at the standard $0.0008/call). Your first $0.50 is free. See [twitterapis.com/pricing](https://www.twitterapis.com/pricing).
-
-## Links
-
-- Docs: [docs.twitterapis.com](https://docs.twitterapis.com)
-- Dashboard / API keys: [twitterapis.com/dashboard](https://www.twitterapis.com/dashboard)
-- Pricing: [twitterapis.com/pricing](https://www.twitterapis.com/pricing)
-- REST API base URL (call it directly, without MCP): `https://api.twitterapis.com`
-
-## FAQ
-
-**Do I need an X (Twitter) developer account?** No. Get an API key at [twitterapis.com/signup](https://www.twitterapis.com/signup); there is no application or approval step.
-
-**Is it read-only?** No. 60 read tools work with just your API key; 34 write actions (post, like, retweet, follow, DM, media upload, List create/add member/remove member, article create/edit/publish/delete, monitor/webhook create/update/delete) act as a linked X account or per-call inline credentials, except monitor/webhook CRUD, which is account administration and needs only your API key.
-
-**Which clients are supported?** Claude Desktop, Cursor, Windsurf, and VS Code (Copilot agent mode), or any Model Context Protocol client.
-
-**How is it billed?** Per request. New keys start with $0.50 in free credits, no card required. See [pricing](https://www.twitterapis.com/pricing).
-
-**Does it store my key or data?** No. The server holds no state and forwards your API key on each call.
-
-## Maintainers
+This fork is based on [TwitterAPIs/twitterapis-mcp](https://github.com/TwitterAPIs/twitterapis-mcp). It keeps the upstream MIT license, tool catalog, and TwitterAPIs behavior.
 
 `src/tools.js` is **generated**. Do not edit it. The catalog is built at build time from two committed inputs:
 
 - `test/openapi.snapshot.json`, a vendored copy of the published OpenAPI spec, which supplies the structure: which endpoints exist, which parameters each accepts, whether a parameter is required, and its type.
 - `scripts/tools.overrides.mjs`, hand-authored, which supplies everything the spec cannot express: the tool and argument descriptions a model reads to decide how to call a tool, the cross-field rules ("provide exactly one of `username` or `user_id`"), the per-call credential arguments that travel as `x-*` headers, and the write / destructive / JSON-body flags.
 
-The spec is vendored on purpose. Nothing is fetched at install time or at server boot, so the published package is a fixed artifact rather than one that depends on a hostname still answering.
+The spec is vendored on purpose. Nothing is fetched at install time or at server boot, so the service does not depend on a hostname still answering.
 
 ```bash
 npm run openapi:refresh   # re-vendor the spec, prints the route diff

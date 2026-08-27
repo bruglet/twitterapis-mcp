@@ -1,61 +1,191 @@
-// Dev-only smoke test (not published). Spawns the stdio server, runs the MCP
-// handshake, calls tools/list, and asserts the full read-tool catalog is
-// advertised with valid schemas. No network/API call is made.
-import { spawn } from "node:child_process";
+// HTTP smoke test for the stateless remote MCP.
+// Uses a local JWKS server and generated RSA keys. It makes no TwitterAPIs call.
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { generateKeyPair, exportJWK, SignJWT } from "jose";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { createAccessAuthenticator } from "../src/access-auth.js";
+import { createHttpServer } from "../src/http-server.js";
+import { createMcpServer } from "../src/mcp-server.js";
+import { TOOLS } from "../src/tools.js";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const child = spawn("node", ["src/index.js"], {
-  cwd: root,
-  env: { ...process.env, TWITTERAPIS_KEY: "smoke-test-key" },
-  stdio: ["pipe", "pipe", "inherit"],
-});
+const packageVersion = createRequire(import.meta.url)("../package.json").version;
+const issuer = "https://team.example.com";
+const audience = "smoke-audience";
 
-const responses = [];
-let buf = "";
-child.stdout.on("data", (d) => {
-  buf += d.toString();
-  let i;
-  while ((i = buf.indexOf("\n")) >= 0) {
-    const line = buf.slice(0, i).trim();
-    buf = buf.slice(i + 1);
-    if (line) { try { responses.push(JSON.parse(line)); } catch {} }
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve(server.address().port));
+  });
+}
+
+function close(server) {
+  return new Promise((resolve, reject) => {
+    if (!server || !server.listening) {
+      resolve();
+      return;
+    }
+    server.close((error) => error ? reject(error) : resolve());
+  });
+}
+
+function initializeBody(id = 1) {
+  return {
+    jsonrpc: "2.0",
+    id,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-03-26",
+      capabilities: {},
+      clientInfo: { name: "http-smoke", version: "1.0.0" },
+    },
+  };
+}
+
+async function makeToken(signingKey, options = {}) {
+  const token = new SignJWT({ sub: "smoke-user" })
+    .setProtectedHeader({ alg: options.algorithm || "RS256", kid: options.kid || "primary" })
+    .setIssuer(options.issuer || issuer)
+    .setAudience(options.audience || audience)
+    .setIssuedAt();
+  if (options.expiration !== undefined) {
+    token.setExpirationTime(options.expiration);
+  } else if (!options.noExpiration) {
+    token.setExpirationTime(Math.floor(Date.now() / 1000) + 300);
   }
+  return token.sign(signingKey);
+}
+
+const { publicKey, privateKey } = await generateKeyPair("RS256");
+const { privateKey: wrongPrivateKey } = await generateKeyPair("RS256");
+const { privateKey: wrongAlgorithmPrivateKey } = await generateKeyPair("RS384");
+const publicJwk = await exportJWK(publicKey);
+publicJwk.kid = "primary";
+publicJwk.alg = "RS256";
+publicJwk.use = "sig";
+
+let jwksRequests = 0;
+const jwksServer = createServer((request, response) => {
+  if (request.url !== "/cdn-cgi/access/certs") {
+    response.writeHead(404).end();
+    return;
+  }
+  jwksRequests++;
+  response.writeHead(200, {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+  });
+  response.end(JSON.stringify({ keys: [publicJwk] }));
 });
 
-const send = (obj) => child.stdin.write(JSON.stringify(obj) + "\n");
+let mcpServer;
+let jwksPort;
+try {
+  jwksPort = await listen(jwksServer);
+  const accessAuthenticator = createAccessAuthenticator({
+    teamDomain: issuer,
+    audience,
+    jwksUri: `http://127.0.0.1:${jwksPort}/cdn-cgi/access/certs`,
+  });
 
-send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "0" } } });
+  let mcpFactoryCalls = 0;
+  const app = createHttpServer({
+    accessAuthenticator,
+    mcpServerFactory: () => {
+      mcpFactoryCalls++;
+      return createMcpServer({
+        callEndpoint: async () => {
+          throw new Error("The smoke test must not call TwitterAPIs");
+        },
+      });
+    },
+  });
+  mcpServer = app;
+  const mcpPort = await listen(app);
+  const baseUrl = `http://127.0.0.1:${mcpPort}`;
+  const validToken = await makeToken(privateKey, { expiration: Math.floor(Date.now() / 1000) + 300 });
 
-setTimeout(() => {
-  send({ jsonrpc: "2.0", method: "notifications/initialized" });
-  send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
-}, 600);
+  async function postMcp(token, id = 1) {
+    const headers = {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+    };
+    if (token !== undefined) {
+      headers["Cf-Access-Jwt-Assertion"] = token;
+    }
+    return fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(initializeBody(id)),
+    });
+  }
 
-setTimeout(() => {
-  const init = responses.find((r) => r.id === 1);
-  const list = responses.find((r) => r.id === 2);
-  const tools = list?.result?.tools || [];
-  const initOk = !!init?.result?.serverInfo;
-  const schemasOk = tools.every((t) => t.name && t.description && t.inputSchema?.type === "object");
-  console.log(`initialize: ${initOk ? "ok" : "FAILED"} (${init?.result?.serverInfo?.name})`);
-  console.log(`tools/list: ${tools.length} tools`);
-  console.log("names:", tools.map((t) => t.name).join(", "));
-
-  // Version-drift gate. The handshake version was hardcoded and silently drifted
-  // (package 0.5.0 was still announcing itself as 0.3.0 to every client), so
-  // assert the advertised version against package.json rather than trusting it.
-  const pkgVersion = createRequire(import.meta.url)("../package.json").version;
-  const advertised = init?.result?.serverInfo?.version;
-  const versionOk = advertised === pkgVersion;
-  console.log(
-    `version: advertised ${advertised} vs package.json ${pkgVersion} -> ${versionOk ? "match" : "DRIFT"}`,
+  assert.equal((await fetch(`${baseUrl}/healthz`)).status, 200, "/healthz is public");
+  assert.equal(mcpFactoryCalls, 0, "/healthz does not create an MCP server");
+  assert.equal((await postMcp()).status, 403, "missing Access JWT is forbidden");
+  assert.equal((await postMcp("not-a-jwt")).status, 403, "invalid Access JWT is forbidden");
+  assert.equal(
+    (await postMcp(await makeToken(privateKey, { issuer: "https://other.example.com" }))).status,
+    403,
+    "wrong issuer is forbidden",
+  );
+  assert.equal(
+    (await postMcp(await makeToken(privateKey, { audience: "other-audience" }))).status,
+    403,
+    "wrong audience is forbidden",
+  );
+  assert.equal(
+    (await postMcp(await makeToken(privateKey, { expiration: Math.floor(Date.now() / 1000) - 60 }))).status,
+    403,
+    "expired JWT is forbidden",
+  );
+  assert.equal(
+    (await postMcp(await makeToken(wrongPrivateKey, { expiration: Math.floor(Date.now() / 1000) + 300 }))).status,
+    403,
+    "invalid JWT signature is forbidden",
+  );
+  assert.equal(
+    (await postMcp(await makeToken(wrongAlgorithmPrivateKey, { algorithm: "RS384" }))).status,
+    403,
+    "non-RS256 JWT is forbidden",
+  );
+  assert.equal(
+    (await postMcp(await makeToken(privateKey, { noExpiration: true }))).status,
+    403,
+    "JWT without expiration is forbidden",
   );
 
-  const pass = initOk && versionOk && tools.length >= 15 && schemasOk;
-  console.log(pass ? "SMOKE: PASS" : "SMOKE: FAIL");
-  child.kill();
-  process.exit(pass ? 0 : 1);
-}, 1800);
+  const directInitialize = await postMcp(validToken, 10);
+  assert.equal(directInitialize.status, 200, "valid JWT initializes MCP over HTTP");
+  assert.match(await directInitialize.text(), /serverInfo/);
+
+  function makeClient(name) {
+    const client = new Client({ name, version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
+      requestInit: { headers: { "Cf-Access-Jwt-Assertion": validToken } },
+    });
+    return { client, transport };
+  }
+
+  const clients = [makeClient("client-one"), makeClient("client-two")];
+  try {
+    await Promise.all(clients.map(({ client, transport }) => client.connect(transport)));
+    const lists = await Promise.all(clients.map(({ client }) => client.listTools()));
+    for (const list of lists) {
+      assert.equal(list.tools.length, TOOLS.length, "tools/list exposes the full catalog");
+      assert.ok(list.tools.every((tool) => tool.name && tool.inputSchema?.type === "object"));
+    }
+    assert.equal(clients[0].client.getServerVersion().version, packageVersion);
+  } finally {
+    await Promise.all(clients.map(({ client }) => client.close()));
+  }
+
+  assert.equal(jwksRequests, 1, "createRemoteJWKSet caches the signing keys");
+  console.log(`smoke: PASS (${TOOLS.length} tools, two simultaneous clients)`);
+} finally {
+  await close(mcpServer);
+  await close(jwksServer);
+}

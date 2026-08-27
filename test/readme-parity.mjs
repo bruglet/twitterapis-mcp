@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// readme-parity.mjs: the README ships INSIDE the npm tarball and is the package
-// page on npmjs.com, so it is a published surface, not a courtesy. A tool that
+// readme-parity.mjs: the README is the service documentation. A tool that
 // exists in the catalog and nowhere in the README is a tool nobody knows to call.
 //
 // This gate exists because that is exactly what happened. Four tools
@@ -41,7 +40,7 @@ for (const n of named) if (!known.has(n)) problems.push(`README documents "${n}"
 //    trusts and the last thing anyone remembers to update.
 const claims = [
   { re: /(\d+) tools: (\d+) reads and (\d+) write actions/, where: "the Tools header" },
-  { re: /(\d+) read tools work with just your API key; (\d+) write actions/, where: "the FAQ" },
+  { re: /(\d+) write actions usually require a linked X session or per-call credentials/, where: "the Tools introduction" },
 ];
 for (const { re, where } of claims) {
   const m = readme.match(re);
@@ -50,7 +49,7 @@ for (const { re, where } of claims) {
     continue;
   }
   const nums = m.slice(1).map(Number);
-  const expected = nums.length === 3 ? [TOOLS.length, reads.length, writes.length] : [reads.length, writes.length];
+  const expected = nums.length === 3 ? [TOOLS.length, reads.length, writes.length] : [writes.length];
   if (JSON.stringify(nums) !== JSON.stringify(expected)) {
     problems.push(`${where} claims ${nums.join("/")} but the catalog is ${expected.join("/")}`);
   }

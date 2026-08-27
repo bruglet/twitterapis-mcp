@@ -11,7 +11,7 @@ const writes = TOOLS.filter((t) => t.write);
 //
 // THESE THREE WERE RED ON MAIN FOR TWELVE DAYS. twitter_users_by_ids and
 // twitter_media_status were merged on 2026-07-31 (49 tools, 35 reads) and these
-// constants were left at the pre-merge 47/33. Because prepublishOnly runs
+// constants were left at the pre-merge 47/33. Because npm test runs
 // `npm test`, that made the package UNPUBLISHABLE: the release everyone was
 // waiting on would have failed at its first step, and the reason was never the
 // npm credential. Nothing caught it because GitHub Actions is permanently off

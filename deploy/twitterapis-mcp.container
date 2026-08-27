@@ -1,0 +1,23 @@
+[Unit]
+Description=TwitterAPIs remote MCP
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+# Replace <owner>/<repo> with the GitHub repository path before installation.
+Image=ghcr.io/<owner>/<repo>:latest
+ContainerName=twitterapis-mcp
+AutoUpdate=registry
+EnvironmentFile=%h/.config/twitterapis-mcp/twitterapis-mcp.env
+PublishPort=127.0.0.1:3000:3000
+HealthCmd=/usr/local/bin/node -e "fetch('http://127.0.0.1:3000/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=5s
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

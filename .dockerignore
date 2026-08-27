@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+test
+scripts
+deploy
+.env
+.env.*
+*.log
+README.md
+CHANGELOG.md
+LICENSE
