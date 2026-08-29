@@ -81,11 +81,11 @@ The workflow publishes `latest` and `sha-<commit>` for `main`. It also publishes
 
 ## Tools
 
-64 registered tools: 60 reads and 4 allowed write actions. Most user endpoints accept `username` (handle without @) **or** `user_id` (`twitter_user_likes` and `twitter_user_tweets_complete` require `user_id`); tweet endpoints accept `id` **or** `url`; paginated endpoints return a `cursor` you pass back to get the next page. Two of the reads are free account/billing lookups (`twitter_account_me`, `twitter_account_payments`); the read-only monitoring tools are also free (account administration, not metered reads).
+65 registered tools: 61 reads and 4 allowed write actions. Most user endpoints accept `username` (handle without @) **or** `user_id` (`twitter_user_likes` and `twitter_user_tweets_complete` require `user_id`); tweet endpoints accept `id` **or** `url`; paginated endpoints return a `cursor` you pass back to get the next page. Two of the reads are free account/billing lookups (`twitter_account_me`, `twitter_account_payments`); the read-only monitoring tools are also free (account administration, not metered reads).
 
 Public read tools work with just your API key. Account-only reads and 4 allowed write actions usually require a linked X session or per-call credentials. The allowed actions are `twitter_grok_chat`, `twitter_customer_session`, `twitter_customer_session_delete`, and `twitter_user_login`.
 
-The complete upstream catalog contains 94 tools. This fork keeps all generated tool code, but it does not register the other 30 write actions. MCP clients cannot list or call those tools. The tables below preserve the complete upstream catalog for synchronization and attribution.
+The complete upstream catalog contains 95 tools. This fork keeps all generated tool code, but it does not register the other 30 write actions. MCP clients cannot list or call those tools. The tables below preserve the complete upstream catalog for synchronization and attribution.
 
 ### Reads
 
@@ -204,6 +204,7 @@ Link an X account to your key once, so the account-only reads and write actions 
 | Tool | What it does |
 |---|---|
 | `twitter_customer_session` | Register your x.com session cookies (`auth_token` + `ct0`) against your key |
+| `twitter_customer_session_status` | Read your registered session status without changing it _(session)_ |
 | `twitter_customer_session_delete` | Revoke that stored session, deleting your `auth_token` + `ct0` from the service. Idempotent and free |
 | `twitter_user_login` | Log in with `username` + `password` (+ `totp_secret` for 2FA); stores the session against your key. Returns a confirmation, never the cookies |
 
