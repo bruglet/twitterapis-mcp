@@ -15,13 +15,14 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { REGISTERED_TOOLS } from "../src/mcp-server.js";
 import { TOOLS } from "../src/tools.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const readme = readFileSync(resolve(HERE, "..", "README.md"), "utf8");
 
-const reads = TOOLS.filter((t) => !t.write);
-const writes = TOOLS.filter((t) => t.write);
+const reads = REGISTERED_TOOLS.filter((t) => !t.write);
+const writes = REGISTERED_TOOLS.filter((t) => t.write);
 const problems = [];
 
 // 1) Every tool has a row. Anchor on the backticked name so a mention inside
@@ -39,27 +40,39 @@ for (const n of named) if (!known.has(n)) problems.push(`README documents "${n}"
 // 3) The stated counts match the catalog. A count is the first thing a reader
 //    trusts and the last thing anyone remembers to update.
 const claims = [
-  { re: /(\d+) tools: (\d+) reads and (\d+) write actions/, where: "the Tools header" },
-  { re: /(\d+) write actions usually require a linked X session or per-call credentials/, where: "the Tools introduction" },
+  {
+    re: /(\d+) registered tools: (\d+) reads and (\d+) allowed write actions/,
+    where: "the Tools header",
+    expected: [REGISTERED_TOOLS.length, reads.length, writes.length],
+  },
+  {
+    re: /Account-only reads and (\d+) allowed write actions usually require a linked X session or per-call credentials/,
+    where: "the Tools introduction",
+    expected: [writes.length],
+  },
+  {
+    re: /complete upstream catalog contains (\d+) tools/,
+    where: "the upstream catalog statement",
+    expected: [TOOLS.length],
+  },
 ];
-for (const { re, where } of claims) {
+for (const { re, where, expected } of claims) {
   const m = readme.match(re);
   if (!m) {
     problems.push(`could not find the tool-count sentence in ${where}; the gate cannot verify a claim it cannot locate`);
     continue;
   }
   const nums = m.slice(1).map(Number);
-  const expected = nums.length === 3 ? [TOOLS.length, reads.length, writes.length] : [writes.length];
   if (JSON.stringify(nums) !== JSON.stringify(expected)) {
     problems.push(`${where} claims ${nums.join("/")} but the catalog is ${expected.join("/")}`);
   }
 }
 
-console.log(`  readme-parity: ${TOOLS.length} tools (${reads.length} reads, ${writes.length} writes), ${named.size} documented`);
+console.log(`  readme-parity: ${REGISTERED_TOOLS.length} registered, ${TOOLS.length} in source, ${named.size} documented`);
 if (problems.length) {
   console.error("");
   for (const p of problems) console.error(`  \x1b[31m✗ ${p}\x1b[0m`);
   console.error(`\n  \x1b[31m✗ readme-parity: ${problems.length} drift(s) between the catalog and README.md\x1b[0m`);
   process.exit(1);
 }
-console.log(`  \x1b[32m✓ readme-parity: every tool documented, no stale rows, counts match the catalog\x1b[0m`);
+console.log(`  \x1b[32m✓ readme-parity: every source tool documented, no stale rows, registered counts match\x1b[0m`);

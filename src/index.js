@@ -3,10 +3,9 @@
 
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-import { TOOLS } from "./tools.js";
 import { createAccessAuthenticator } from "./access-auth.js";
 import { createHttpServer } from "./http-server.js";
-import { createMcpServer } from "./mcp-server.js";
+import { createMcpServer, REGISTERED_TOOLS } from "./mcp-server.js";
 import { createTwitterApisClient } from "./twitterapis-client.js";
 
 const DEFAULT_HOST = "0.0.0.0";
@@ -39,7 +38,7 @@ export async function main() {
   const boundAddress = typeof address === "object" && address
     ? `${address.address}:${address.port}`
     : `${host}:${port}`;
-  console.error(`[twitterapis-mcp] ready · ${TOOLS.length} tools · http://${boundAddress}/mcp`);
+  console.error(`[twitterapis-mcp] ready · ${REGISTERED_TOOLS.length} tools · http://${boundAddress}/mcp`);
   return server;
 }
 

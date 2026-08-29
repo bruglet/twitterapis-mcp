@@ -81,9 +81,11 @@ The workflow publishes `latest` and `sha-<commit>` for `main`. It also publishes
 
 ## Tools
 
-94 tools: 60 reads and 34 write actions. Most user endpoints accept `username` (handle without @) **or** `user_id` (`twitter_user_likes` and `twitter_user_tweets_complete` require `user_id`); tweet endpoints accept `id` **or** `url`; paginated endpoints return a `cursor` you pass back to get the next page. Two of the reads are free account/billing lookups (`twitter_account_me`, `twitter_account_payments`); the 14 monitoring tools are also free (account administration, not metered reads).
+64 registered tools: 60 reads and 4 allowed write actions. Most user endpoints accept `username` (handle without @) **or** `user_id` (`twitter_user_likes` and `twitter_user_tweets_complete` require `user_id`); tweet endpoints accept `id` **or** `url`; paginated endpoints return a `cursor` you pass back to get the next page. Two of the reads are free account/billing lookups (`twitter_account_me`, `twitter_account_payments`); the read-only monitoring tools are also free (account administration, not metered reads).
 
-Public read tools work with just your API key. Account-only reads and 34 write actions usually require a linked X session or per-call credentials. The monitoring tools administer your twitterapis.com account and need only your API key. Each write tool is annotated `readOnlyHint: false`; reversing actions are annotated `destructiveHint: true`.
+Public read tools work with just your API key. Account-only reads and 4 allowed write actions usually require a linked X session or per-call credentials. The allowed actions are `twitter_grok_chat`, `twitter_customer_session`, `twitter_customer_session_delete`, and `twitter_user_login`.
+
+The complete upstream catalog contains 94 tools. This fork keeps all generated tool code, but it does not register the other 30 write actions. MCP clients cannot list or call those tools. The tables below preserve the complete upstream catalog for synchronization and attribution.
 
 ### Reads
 

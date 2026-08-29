@@ -8,12 +8,18 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createAccessAuthenticator } from "../src/access-auth.js";
 import { createHttpServer } from "../src/http-server.js";
-import { createMcpServer } from "../src/mcp-server.js";
+import { createMcpServer, REGISTERED_TOOLS } from "../src/mcp-server.js";
 import { TOOLS } from "../src/tools.js";
 
 const packageVersion = createRequire(import.meta.url)("../package.json").version;
 const issuer = "https://team.example.com";
 const audience = "smoke-audience";
+const allowedWriteTools = new Set([
+  "twitter_grok_chat",
+  "twitter_customer_session",
+  "twitter_customer_session_delete",
+  "twitter_user_login",
+]);
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -92,12 +98,14 @@ try {
   });
 
   let mcpFactoryCalls = 0;
+  let endpointCalls = 0;
   const app = createHttpServer({
     accessAuthenticator,
     mcpServerFactory: () => {
       mcpFactoryCalls++;
       return createMcpServer({
         callEndpoint: async () => {
+          endpointCalls++;
           throw new Error("The smoke test must not call TwitterAPIs");
         },
       });
@@ -175,16 +183,46 @@ try {
     await Promise.all(clients.map(({ client, transport }) => client.connect(transport)));
     const lists = await Promise.all(clients.map(({ client }) => client.listTools()));
     for (const list of lists) {
-      assert.equal(list.tools.length, TOOLS.length, "tools/list exposes the full catalog");
+      const names = new Set(list.tools.map((tool) => tool.name));
+      assert.equal(list.tools.length, 64, "tools/list exposes 64 approved tools");
+      assert.deepEqual(
+        names,
+        new Set(REGISTERED_TOOLS.map((tool) => tool.name)),
+        "tools/list matches the registration filter",
+      );
+      assert.ok(
+        TOOLS.filter((tool) => !tool.write).every((tool) => names.has(tool.name)),
+        "tools/list exposes all 60 read tools",
+      );
+      assert.ok(
+        [...allowedWriteTools].every((name) => names.has(name)),
+        "tools/list exposes the four allowed write tools",
+      );
+      assert.ok(
+        TOOLS.filter((tool) => tool.write && !allowedWriteTools.has(tool.name))
+          .every((tool) => !names.has(tool.name)),
+        "tools/list hides the other 30 write tools",
+      );
       assert.ok(list.tools.every((tool) => tool.name && tool.inputSchema?.type === "object"));
     }
+    const hiddenToolResult = await clients[0].client.callTool({
+      name: "twitter_create_tweet",
+      arguments: { text: "must not send" },
+    });
+    assert.equal(hiddenToolResult.isError, true, "an unregistered write tool cannot be called");
+    assert.match(
+      hiddenToolResult.content.map((item) => item.text || "").join(" "),
+      /not found|unknown/i,
+      "the client receives a missing-tool error",
+    );
+    assert.equal(endpointCalls, 0, "a rejected write-tool call does not contact TwitterAPIs");
     assert.equal(clients[0].client.getServerVersion().version, packageVersion);
   } finally {
     await Promise.all(clients.map(({ client }) => client.close()));
   }
 
   assert.equal(jwksRequests, 1, "createRemoteJWKSet caches the signing keys");
-  console.log(`smoke: PASS (${TOOLS.length} tools, two simultaneous clients)`);
+  console.log(`smoke: PASS (${REGISTERED_TOOLS.length} tools, two simultaneous clients)`);
 } finally {
   await close(mcpServer);
   await close(jwksServer);
