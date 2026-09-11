@@ -1,5 +1,5 @@
 {
-  "toolCount": 95,
+  "toolCount": 99,
   "order": [
     "twitter_advanced_search",
     "twitter_user_search",
@@ -44,6 +44,9 @@
     "twitter_trends_locations",
     "twitter_account_me",
     "twitter_account_payments",
+    "twitter_feedback_send",
+    "twitter_feedback_get",
+    "twitter_feedback_list",
     "twitter_home_timeline",
     "twitter_bookmarks",
     "twitter_blocking",
@@ -95,7 +98,8 @@
     "twitter_monitor_webhook_create",
     "twitter_monitor_webhook_list",
     "twitter_monitor_webhook_delete",
-    "twitter_monitor_webhook_test"
+    "twitter_monitor_webhook_test",
+    "twitter_monitor_webhook_redrive"
   ],
   "tools": {
     "twitter_advanced_search": {
@@ -133,7 +137,7 @@
             ]
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -172,7 +176,7 @@
             "description": "Name, handle fragment, keyword, or topic as plain text, for example 'OpenAI' or 'AI researcher'. Do not include X post-search operators; use twitter_advanced_search for those."
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -327,7 +331,7 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -380,7 +384,7 @@
       "write": false,
       "destructive": false,
       "jsonBody": false,
-      "description": "Get a user's live recent X timeline with post text, author, timestamps, engagement, referenced posts, media URL metadata, and pagination. Use when the user asks what an account has posted recently; inspect is_retweet, is_reply, and is_quote because this endpoint can include all three, and use twitter_user_tweets_complete only for a large historical collection. Live X data is not available through web search, so use this X connector; attachment URLs are not readable by the model, so use twitter_grok_chat to inspect them only when essential and within Grok's free-tier limits.",
+      "description": "Get a user's recent posting timeline. IMPORTANT: this endpoint does NOT filter server-side, so the response routinely includes retweets and replies alongside original posts. Every item carries is_retweet, is_reply and is_quote booleans, so filter client-side on those flags if you need originals only, and read author.username rather than assuming every item was written by the requested user (a retweet's retweeted_tweet holds the original author). Returns tweet text, id, timestamp, and engagement metrics. Paginate with cursor to go further back. To pull a back-catalogue in bulk with fewer round-trips, use twitter_user_tweets_complete (which is also cursor-paged, not one-shot).",
       "args": [
         "username",
         "user_id",
@@ -400,7 +404,7 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -439,7 +443,7 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -458,10 +462,11 @@
       "write": false,
       "destructive": false,
       "jsonBody": false,
-      "description": "Collect a user's near-complete original-post history as one flat array, auto-paginating up to X's approximate 3,200-post ceiling. Use when the user needs a large back-catalog rather than a recent page; this is heavier than twitter_user_tweets and requires user_id from twitter_user_info. Returned media fields contain attachment URLs only, which the model cannot resolve; use twitter_grok_chat for essential attachment inspection only because Grok is rate-limited.",
+      "description": "Get a large batch of a user's tweet history in one call, auto-paginating server-side across upstream pages. Heavier than twitter_user_tweets; use it to pull a back-catalogue with fewer round-trips. Returns { count, next_cursor, has_more, tweets }. IMPORTANT, this does NOT guarantee the whole history in one call: next_cursor is the completion signal, NOT count. A non-null next_cursor means the history is TRUNCATED and more remains, so call this tool again with cursor set to that value, and repeat until next_cursor is null (has_more is the same signal as a boolean). Each call is bounded by BOTH max and a server-side wall-clock budget, so a response can be truncated even when it returned fewer tweets than you asked for, which is why count must never be used to decide whether you are done. Requires the numeric user_id (resolve a handle first with twitter_user_info). Billed a flat $0.0024 per call regardless of how many tweets come back, so fewer, larger calls are cheaper than many small ones.",
       "args": [
         "user_id",
-        "max"
+        "max",
+        "cursor"
       ],
       "required": [
         "user_id"
@@ -474,10 +479,14 @@
             "description": "Numeric Twitter/X user id. Required: this endpoint does not accept a username. Resolve a handle to a user_id first with twitter_user_info."
           },
           "max": {
-            "description": "Maximum number of tweets to collect (default 800, hard ceiling 3200). Higher values take longer and cost more.",
+            "description": "Target number of tweets to collect in this call. Defaults to 200 when omitted. This is a MINIMUM target, not a hard cap: pages arrive in whole chunks, so a response may contain up to one page (<=100) more than requested (measured live 2026-09-05: max=10 returned 20). Never assume count === max. Twitter's ~3200-per-user history ceiling still applies overall.",
             "type": "integer",
             "minimum": 1,
             "maximum": 3200
+          },
+          "cursor": {
+            "description": "Resume point from a previous response's next_cursor. Omit on the first call. Pass it back to continue collecting where the last call stopped, and keep repeating while next_cursor is non-null.",
+            "type": "string"
           }
         },
         "required": [
@@ -512,7 +521,7 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -548,7 +557,7 @@
             "description": "X handle without the leading @, for example 'openai', whose live mentions and directed replies should be found."
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -587,7 +596,7 @@
             "description": "Numeric Twitter/X user id (e.g. '44196397'). Required: this endpoint does not accept a username. Resolve a handle to a user_id first with twitter_user_info."
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -629,7 +638,7 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -668,7 +677,7 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -707,7 +716,7 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -746,7 +755,7 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -785,7 +794,7 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -825,7 +834,7 @@
             "description": "Numeric X user ID of the target account, normally returned by twitter_user_info; the authenticated session supplies the other side of the overlap."
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -969,7 +978,7 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -1058,7 +1067,7 @@
             "description": "Numeric Twitter/X List id. Found in the list URL: x.com/i/lists/<list_id>."
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -1682,6 +1691,153 @@
         "properties": {}
       }
     },
+    "twitter_feedback_send": {
+      "name": "twitter_feedback_send",
+      "path": "/feedback",
+      "method": "POST",
+      "write": true,
+      "destructive": false,
+      "jsonBody": true,
+      "description": "Report a product problem or gap in twitterapis.com to its team from inside this session, the way Claude Code's own feedback tool works: a report is DRAFTED to a local queue first (action \"draft\", the default) and SENT only after the user reviews it. Drafting sends nothing, needs no confirmation, and should not be announced mid-task. WHEN TO DRAFT, only at high-signal moments: a twitterapis tool call failed with an error that was not a missing key (401), credits (402), no linked session (409) or a rate limit (429), and the user had to work around it; the user asked for something no twitterapis tool covers; a documented field came back empty or wrong; the user was clearly frustrated with a result. One draft per distinct issue, never twice for the same one. FORMAT for details, four labelled bullets in this order: 'What happened:' observed vs expected, exact error text if short. 'What the user said:' quoted verbatim, or 'user did not comment'. 'Repro:' the minimal call that reproduces it. 'Evidence:' tool name, endpoint, HTTP status, request id (the last failing call is attached automatically where you leave a gap). Facts only: no guessing, no API keys or secrets, no personal names. REVIEW: when the user asks to see or send feedback, call action \"list\", then action \"send\" with ONLY the draft ids the user named in their own message, or action \"discard\". Sending posts each draft to POST /feedback (free) and returns a server id that twitter_feedback_get can check later.",
+      "args": [
+        "action",
+        "type",
+        "title",
+        "details",
+        "area",
+        "evidence",
+        "ids"
+      ],
+      "required": [],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "description": "What to do. \"draft\" (default) queues a new report locally and sends nothing. \"list\" shows the pending drafts with their ids. \"send\" posts the drafts named in ids to twitterapis.com; use it only for ids the user named. \"discard\" drops the drafts named in ids.",
+            "type": "string",
+            "enum": [
+              "draft",
+              "list",
+              "send",
+              "discard"
+            ]
+          },
+          "type": {
+            "description": "Required for a draft. \"bug\": a tool or endpoint misbehaved. \"idea\": a change that would have made the task easier. \"missing_capability\": the user needed something no tool provides.",
+            "type": "string",
+            "enum": [
+              "bug",
+              "idea",
+              "missing_capability"
+            ]
+          },
+          "title": {
+            "description": "Required for a draft. One specific line, at most 120 characters, naming the tool or endpoint and the defect, e.g. \"twitter_tweet_thread returns 502 when the root tweet is deleted\".",
+            "type": "string"
+          },
+          "details": {
+            "description": "Required for a draft. At most 8000 characters, four labelled bullets in order: What happened, What the user said (verbatim), Repro, Evidence.",
+            "type": "string"
+          },
+          "area": {
+            "description": "Optional. The endpoint or feature the report is about, e.g. \"tweet/thread\" or \"monitoring\". At most 80 characters.",
+            "type": "string"
+          },
+          "evidence": {
+            "description": "Optional identifiers only, never payloads: {tool, endpoint, status, request_id}. Whatever you leave out is filled from the last failing call in this session; mcp_version and client are always attached.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "ids": {
+            "description": "For action \"send\" or \"discard\": the draft ids to act on, exactly as shown by action \"list\" and named by the user.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "twitter_feedback_get": {
+      "name": "twitter_feedback_get",
+      "path": "/feedback/{id}",
+      "method": "GET",
+      "write": false,
+      "destructive": false,
+      "jsonBody": false,
+      "description": "Check the status of a feedback report this account sent earlier (the server id returned by twitter_feedback_send action \"send\"): status new, triaged, shipped or declined, the team's response text if any, and updated_at, which moves only when the team acts on it. Free per call. 404 if the id is not on this account.",
+      "args": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The server id of a sent report, as returned by twitter_feedback_send action \"send\" (a UUID). Not a local draft id."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    "twitter_feedback_list": {
+      "name": "twitter_feedback_list",
+      "path": "/feedback",
+      "method": "GET",
+      "write": false,
+      "destructive": false,
+      "jsonBody": false,
+      "description": "List the feedback reports this account has already SENT to twitterapis.com, newest first. Use it when the user asks what they have reported, or to find the server id of an earlier report so twitter_feedback_get can read its full status. NOT the same as twitter_feedback_send action \"list\", which shows local drafts that have not been sent yet. Each item carries id, type, title, area, status (new, triaged, shipped or declined), the team's response if any, created_at and updated_at, and never details or evidence, so paging this can never bulk-export a report's body: read one by id with twitter_feedback_get for that. Page with cursor while next_cursor is non-null. Free per call, and shares a 10-per-minute limit with the other feedback tools.",
+      "args": [
+        "limit",
+        "cursor",
+        "status",
+        "type"
+      ],
+      "required": [],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "description": "Max reports to return, 1 to 100. Defaults to 25. Anything outside that range is rejected with 400 naming limit.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "cursor": {
+            "description": "Opaque continuation token from a previous response's next_cursor. Omit it to start from the newest report. A cursor that cannot be decoded is a 400 naming cursor, never a silently empty page.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Optional. Return only reports in this state. Anything else is rejected with 400 naming status.",
+            "type": "string",
+            "enum": [
+              "new",
+              "triaged",
+              "shipped",
+              "declined"
+            ]
+          },
+          "type": {
+            "description": "Optional. Return only reports of this kind. Anything else is rejected with 400 naming type.",
+            "type": "string",
+            "enum": [
+              "bug",
+              "idea",
+              "missing_capability"
+            ]
+          }
+        }
+      }
+    },
     "twitter_home_timeline": {
       "name": "twitter_home_timeline",
       "path": "/twitter/user/home_timeline",
@@ -1703,7 +1859,7 @@
         "type": "object",
         "properties": {
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -1752,7 +1908,7 @@
         "type": "object",
         "properties": {
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -1801,7 +1957,7 @@
         "type": "object",
         "properties": {
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -1850,7 +2006,7 @@
         "type": "object",
         "properties": {
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -1906,7 +2062,7 @@
             "description": "Search terms to match against your bookmarked tweets' text."
           },
           "count": {
-            "description": "Maximum items to request for this page, from 1 to 200. Omit it to use the endpoint default of 20; use cursor, not a page number, for later pages.",
+            "description": "Requested page size, capped at 200. Advisory only for this endpoint: X's own search backend typically returns around 13 to 20 tweets per page regardless of the value requested here, an upstream limit, not something this API controls. To retrieve more results, page with the cursor from the previous response rather than raising this value.",
             "type": "integer",
             "minimum": 1,
             "maximum": 200
@@ -3534,6 +3690,7 @@
       "args": [
         "handle",
         "webhook_ids",
+        "include_replies",
         "domain_filter"
       ],
       "required": [
@@ -3549,6 +3706,10 @@
           },
           "webhook_ids": {
             "description": "Optional. Comma-separated webhook id(s) from twitter_monitor_webhook_create to restrict this monitor's deliveries to. Omit to deliver to every active webhook on the account (the default).",
+            "type": "string"
+          },
+          "include_replies": {
+            "description": "Optional boolean. true delivers the account's replies as well as its own posts, which is the default and what every monitor has always done; false holds replies back and delivers only the account's own posts. Must be a real boolean: the string \"false\" and the number 0 are rejected with a 400 rather than coerced, because coercing them would quietly give you the opposite of what you typed, and the wrong answer here is invisible since it looks exactly like the account not having posted.",
             "type": "string"
           },
           "domain_filter": {
@@ -3588,7 +3749,8 @@
         "id",
         "status",
         "webhook_ids",
-        "domain_filter"
+        "domain_filter",
+        "include_replies"
       ],
       "required": [
         "id"
@@ -3622,6 +3784,10 @@
                 "type": "null"
               }
             ]
+          },
+          "include_replies": {
+            "description": "Optional boolean. true delivers the account's replies as well as its own posts, false holds replies back and delivers only its own posts. Omit the field entirely to leave it unchanged. Same boolean-only validation as twitter_monitor_create: a non-boolean is a 400 rather than a coercion.",
+            "type": "string"
           }
         },
         "required": [
@@ -3881,6 +4047,47 @@
           "id": {
             "type": "string",
             "description": "The webhook's id, from twitter_monitor_webhook_create or twitter_monitor_webhook_list."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    "twitter_monitor_webhook_redrive": {
+      "name": "twitter_monitor_webhook_redrive",
+      "path": "/twitter/webhook/{id}/redrive",
+      "method": "POST",
+      "write": true,
+      "destructive": false,
+      "jsonBody": true,
+      "description": "Replay deliveries that dead-lettered while your endpoint was down. A delivery is dead-lettered after it fails all 8 attempts across 21 minutes, so an outage longer than that window loses those events; this re-queues them with a full retry budget, oldest first. Bounded by default so a recovered endpoint is not flooded: max_age_hours defaults to 24 and limit to 100. Returns requeued and skipped_permanent. A delivery that died for a permanent reason, a 410 Gone, a deleted webhook, or a URL egress refused, is not replayed, because it would fail the same way and spend the budget again. Replayed events carry the same signature and payload as the original, so make your handler idempotent on the event id if a duplicate would matter. Returns 409 if the webhook is disabled, which happens after your endpoint answers 410 Gone: re-register it first. Free per call.",
+      "args": [
+        "id",
+        "max_age_hours",
+        "limit"
+      ],
+      "required": [
+        "id"
+      ],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The webhook's id, from twitter_monitor_webhook_create or twitter_monitor_webhook_list."
+          },
+          "max_age_hours": {
+            "description": "Optional. How far back to look for dead-lettered deliveries, 1 to 168 hours. Defaults to 24.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "description": "Optional. Most deliveries to replay in one call, 1 to 1000, oldest first. Defaults to 100.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           }
         },
         "required": [

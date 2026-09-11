@@ -52,7 +52,7 @@ function initializeBody(id = 1) {
 }
 
 async function makeToken(signingKey, options = {}) {
-  const token = new SignJWT({ sub: "smoke-user" })
+  const token = new SignJWT(options.claims || { sub: "smoke-user" })
     .setProtectedHeader({ alg: options.algorithm || "RS256", kid: options.kid || "primary" })
     .setIssuer(options.issuer || issuer)
     .setAudience(options.audience || audience)
@@ -115,6 +115,10 @@ try {
   const mcpPort = await listen(app);
   const baseUrl = `http://127.0.0.1:${mcpPort}`;
   const validToken = await makeToken(privateKey, { expiration: Math.floor(Date.now() / 1000) + 300 });
+  const serviceToken = await makeToken(privateKey, {
+    claims: { sub: "", common_name: "service-token.access" },
+    expiration: Math.floor(Date.now() / 1000) + 300,
+  });
 
   async function postMcp(token, id = 1) {
     const headers = {
@@ -170,6 +174,10 @@ try {
   assert.equal(directInitialize.status, 200, "valid JWT initializes MCP over HTTP");
   assert.match(await directInitialize.text(), /serverInfo/);
 
+  const serviceInitialize = await postMcp(serviceToken, 11);
+  assert.equal(serviceInitialize.status, 200, "service-token JWT initializes MCP over HTTP");
+  assert.match(await serviceInitialize.text(), /serverInfo/);
+
   function makeClient(name) {
     const client = new Client({ name, version: "1.0.0" });
     const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
@@ -184,7 +192,7 @@ try {
     const lists = await Promise.all(clients.map(({ client }) => client.listTools()));
     for (const list of lists) {
       const names = new Set(list.tools.map((tool) => tool.name));
-      assert.equal(list.tools.length, 65, "tools/list exposes 65 approved tools");
+      assert.equal(list.tools.length, 67, "tools/list exposes 67 approved tools");
       assert.deepEqual(
         names,
         new Set(REGISTERED_TOOLS.map((tool) => tool.name)),
@@ -192,7 +200,7 @@ try {
       );
       assert.ok(
         TOOLS.filter((tool) => !tool.write).every((tool) => names.has(tool.name)),
-        "tools/list exposes all 61 read tools",
+        "tools/list exposes all 63 read tools",
       );
       assert.ok(
         [...allowedWriteTools].every((name) => names.has(name)),
@@ -201,7 +209,7 @@ try {
       assert.ok(
         TOOLS.filter((tool) => tool.write && !allowedWriteTools.has(tool.name))
           .every((tool) => !names.has(tool.name)),
-        "tools/list hides the other 30 write tools",
+        "tools/list hides the other 32 write tools",
       );
       assert.ok(list.tools.every((tool) => tool.name && tool.inputSchema?.type === "object"));
     }

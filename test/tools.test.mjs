@@ -34,9 +34,19 @@ const writes = TOOLS.filter((t) => t.write);
 // constant was never bumped and the generator never learned the endpoint
 // existed. Backfilled into the override + refreshed the vendored spec so the
 // tool is generated again, not hand-maintained; writes unchanged at 34.
-const EXPECTED_TOOLS = 95;
-const EXPECTED_READS = 61;
-const EXPECTED_WRITES = 34;
+// Bumped 95 -> 96 on 2026-08-31 with twitter_monitor_webhook_redrive (POST,
+// write), which replays deliveries that dead-lettered while a customer endpoint
+// was down. Writes 34 -> 35, reads unchanged at 61, so the MCP catalog is now at
+// exact parity with the API: 96 endpoints, 61 reads and 35 writes.
+// Bumped 96 -> 98 on 2026-09-04 with twitter_feedback_send (POST /feedback, a
+// write with a local draft queue) and twitter_feedback_get (GET /feedback/{id},
+// a read): 98 endpoints, 62 reads and 36 writes, still exact parity.
+// Bumped 98 -> 99 on 2026-09-05 with twitter_feedback_list (GET /feedback), which
+// the API shipped after 0.9.7 and which no tool covered: 99 endpoints, 63 reads
+// and 36 writes, still exact parity.
+const EXPECTED_TOOLS = 99;
+const EXPECTED_READS = 63;
+const EXPECTED_WRITES = 36;
 check(`${EXPECTED_TOOLS} tools (got ${TOOLS.length})`, TOOLS.length === EXPECTED_TOOLS);
 check(`${EXPECTED_READS} reads (got ${reads.length})`, reads.length === EXPECTED_READS);
 check(`${EXPECTED_WRITES} writes (got ${writes.length})`, writes.length === EXPECTED_WRITES);
@@ -54,7 +64,7 @@ check("names unique", new Set(TOOLS.map((t) => t.name)).size === TOOLS.length);
 // /twitter/monitor/{id}), so the catalog's true routing key is (method, path).
 check("(method, path) unique", new Set(TOOLS.map((t) => `${t.method || "GET"} ${t.path}`)).size === TOOLS.length);
 check("all names twitter_*", TOOLS.every((t) => /^twitter_[a-z0-9_]+$/.test(t.name)));
-check("all paths /twitter/* or /account/* or /oapi/x_user_stream/*", TOOLS.every((t) => t.path.startsWith("/twitter/") || t.path.startsWith("/account/") || t.path.startsWith("/oapi/x_user_stream/")));
+check("all paths /twitter/* or /account/* or /oapi/x_user_stream/* or /feedback*", TOOLS.every((t) => t.path.startsWith("/twitter/") || t.path.startsWith("/account/") || t.path.startsWith("/oapi/x_user_stream/") || t.path === "/feedback" || t.path.startsWith("/feedback/")));
 check("all have a real description", TOOLS.every((t) => typeof t.description === "string" && t.description.length > 20));
 check("all have an object shape", TOOLS.every((t) => t.shape && typeof t.shape === "object" && !Array.isArray(t.shape)));
 
@@ -85,11 +95,16 @@ check("pathParams match {name} templates in path", TOOLS.every((t) => {
 // resolution. Every call to any of these 5 tools failed with a 400 "Provide
 // `handle`/`url`/... in the JSON body" error, live-reproduced against
 // production before this fix (products/twitterapis-backend, monitor.ts /
-// webhook.ts / getxapi-stream-compat.ts).
+// webhook.ts / the x_user_stream compat module).
 const JSON_BODY_WRITES = [
+  "twitter_feedback_send", // POST /feedback reads a JSON body (2026-09-04)
   "twitter_media_upload", "twitter_customer_session", "twitter_user_login", "twitter_article_update_content",
   "twitter_monitor_create", "twitter_monitor_update", "twitter_monitor_webhook_create",
   "twitter_x_user_stream_add_user", "twitter_x_user_stream_remove_user",
+  // Added 2026-08-31 with the redrive tool. Its handler reads max_age_hours and
+  // limit from the body only, so without jsonBody every call would go out as a
+  // query string and 400, the same live failure the five tools above hit.
+  "twitter_monitor_webhook_redrive",
 ];
 check("json-body writes present: POST + write + jsonBody", JSON_BODY_WRITES.every((n) => {
   const t = TOOLS.find((x) => x.name === n);
@@ -218,6 +233,27 @@ check("resolvePathParams throws on an empty-string value too", (() => {
     return e instanceof MissingPathParamError;
   }
 })());
+
+// twitter_user_tweets_complete is cursor-paged and truncating. These guard the
+// exact drift shipped in 0.5.0: no cursor arg, and a "default 800" that the
+// backend had already dropped to 200. Verified live 2026-07-20.
+// Every assertion below is crash-safe (optional chaining + "" fallbacks) so each
+// one fails by ASSERTION against the pre-fix catalog rather than throwing and
+// aborting the run before the later checks get to speak.
+const COMPLETE = TOOLS.find((t) => t.name === "twitter_user_tweets_complete");
+const C_DESC = COMPLETE?.description ?? "";
+const C_MAX = COMPLETE?.shape?.max?.description ?? "";
+check("tweets_complete exposes a cursor arg (resume path)", !!COMPLETE?.shape?.cursor);
+check("tweets_complete cursor is optional (omitted on first call)", COMPLETE?.shape?.cursor?.isOptional?.() === true);
+// NB: JSON.stringify on a zod schema does NOT expose .describe() text, so this
+// must read the description strings directly or it silently passes forever.
+check("tweets_complete no longer claims the removed 800 default", !/default 800/i.test(C_MAX + " " + C_DESC));
+check("tweets_complete documents the real 200 default", /default(?:s to)? 200\b/i.test(C_MAX));
+check("tweets_complete documents max as a minimum, not a cap", /minimum target/i.test(C_MAX));
+check("tweets_complete documents next_cursor as the completion signal", /next_cursor/i.test(C_DESC) && /not count/i.test(C_DESC));
+check("tweets_complete warns the response can be truncated", /truncat/i.test(C_DESC));
+check("tweets_complete documents flat per-call billing", /per CALL/i.test(C_DESC));
+check("no tool promises a full history in one call", !TOOLS.some((t) => /full back-catalogue in one call|near-complete/i.test(t.description || "")));
 
 console.log(`tools.test: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

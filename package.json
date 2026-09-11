@@ -1,6 +1,7 @@
 {
   "name": "@twitterapis/mcp",
-  "version": "0.9.4",
+  "mcpName": "io.github.TwitterAPIs/twitterapis-mcp",
+  "version": "0.9.8",
   "private": true,
   "description": "Remote MCP server for twitterapis.com with read tools, X session setup, and Grok chat.",
   "repository": {
@@ -17,7 +18,7 @@
     "build": "node scripts/gen-tools.mjs --write",
     "build:check": "node scripts/gen-tools.mjs --check",
     "openapi:refresh": "node scripts/openapi-refresh.mjs",
-    "test": "node scripts/gen-tools.mjs --check && node test/gen-tools-endpoints.mjs && node test/catalog-identity.mjs && node test/tools.test.mjs && node test/smoke.mjs && node test/openapi-parity.mjs && node test/body-mode-parity.mjs && node test/readme-parity.mjs",
+    "test": "node scripts/gen-tools.mjs --check && node test/gen-tools-endpoints.mjs && node test/catalog-identity.mjs && node test/tools.test.mjs && node test/feedback.test.mjs && node test/hint-for.test.mjs && node test/smoke.mjs && node test/openapi-parity.mjs && node test/body-mode-parity.mjs && node test/readme-parity.mjs",
     "check:openapi-parity": "node test/openapi-parity.mjs",
     "check:body-mode-parity": "node test/body-mode-parity.mjs"
   },
