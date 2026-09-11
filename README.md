@@ -81,11 +81,11 @@ The workflow publishes `latest` and `sha-<commit>` for `main`. It also publishes
 
 ## Tools
 
-65 registered tools: 61 reads and 4 allowed write actions. Most user endpoints accept `username` (handle without @) **or** `user_id` (`twitter_user_likes` and `twitter_user_tweets_complete` require `user_id`); tweet endpoints accept `id` **or** `url`; paginated endpoints return a `cursor` you pass back to get the next page. Two of the reads are free account/billing lookups (`twitter_account_me`, `twitter_account_payments`); the read-only monitoring tools are also free (account administration, not metered reads).
+67 registered tools: 63 reads and 4 allowed write actions. Most user endpoints accept `username` (handle without @) **or** `user_id` (`twitter_user_likes` and `twitter_user_tweets_complete` require `user_id`); tweet endpoints accept `id` **or** `url`; paginated endpoints return a `cursor` you pass back to get the next page. Four of the reads are free account lookups (`twitter_account_me`, `twitter_account_payments`, `twitter_feedback_get`, `twitter_feedback_list`); the read-only monitoring tools are also free.
 
-Public read tools work with just your API key. Account-only reads and 4 allowed write actions usually require a linked X session or per-call credentials. The allowed actions are `twitter_grok_chat`, `twitter_customer_session`, `twitter_customer_session_delete`, and `twitter_user_login`.
+Public reads work with your API key. Account-only reads and 4 allowed write actions usually require a linked X session or per-call credentials. The allowed actions are `twitter_grok_chat`, `twitter_customer_session`, `twitter_customer_session_delete`, and `twitter_user_login`.
 
-The complete upstream catalog contains 95 tools. This fork keeps all generated tool code, but it does not register the other 30 write actions. MCP clients cannot list or call those tools. The tables below preserve the complete upstream catalog for synchronization and attribution.
+The complete upstream catalog contains 99 tools. This fork keeps all generated tool definitions, but it does not register the other 32 write actions. MCP clients cannot list or call those tools. The tables below preserve the complete upstream catalog for synchronization and attribution.
 
 ### Reads
 
@@ -101,7 +101,7 @@ The complete upstream catalog contains 95 tools. This fork keeps all generated t
 | `twitter_check_follow_relationship` | Follow relationship between two user ids (who follows whom) |
 | `twitter_user_tweets` | A user's recent original tweets (replies excluded) |
 | `twitter_user_tweets_and_replies` | A user's full timeline (tweets + replies) |
-| `twitter_user_tweets_complete` | A user's near-complete tweet history in one auto-paginated call |
+| `twitter_user_tweets_complete` | A large batch of a user's tweet history per call (see [paging note](#paging-twitter_user_tweets_complete)) |
 | `twitter_user_media` | Images and videos a user has posted |
 | `twitter_user_mentions` | Recent public tweets mentioning a user |
 | `twitter_user_likes` | Tweets a user has liked (public Likes tab) |
@@ -196,6 +196,17 @@ Watch an X account for new posts and get them pushed to your own HTTPS endpoint,
 | `twitter_monitor_webhook_list` | List every webhook registered on your account |
 | `twitter_monitor_webhook_delete` | Soft-delete a webhook by id (irreversible from the caller's side) |
 | `twitter_monitor_webhook_test` | Send one signed test event to a webhook right now, synchronously |
+| `twitter_monitor_webhook_redrive` | Replay deliveries that dead-lettered while your endpoint was down, oldest first |
+
+### Feedback _(report a bug or a gap to the twitterapis.com team without leaving your session; free)_
+
+Modelled on Claude Code's own feedback tool. When a call fails in a way that is not your key, credits, session or a rate limit, when you ask for something no tool covers, or when a result is plainly wrong, the model can **draft** a report into a local queue (`~/.twitterapis/feedback-queue.json`, at most 10 drafts, override the directory with `TWITTERAPIS_FEEDBACK_DIR`). Nothing is sent until you ask to review the queue and name the drafts to send. Each report carries the last failing call's endpoint, status and request id, your client name and this package's version, so the team can act on it without a follow-up. Use `twitter_feedback_get` with the returned server id to see whether it was triaged, shipped or declined.
+
+| Tool | What it does |
+|---|---|
+| `twitter_feedback_send` | `action: "draft"` (default) queues a report locally and sends nothing; `"list"` shows the queue; `"send"` posts only the drafts you name to `POST /feedback`; `"discard"` drops them |
+| `twitter_feedback_get` | Read a sent report's status (`new`, `triaged`, `shipped`, `declined`) and the team's response |
+| `twitter_feedback_list` | List the reports this account has already sent, newest first, with `status`/`type` filters and a `cursor` to page |
 
 ### Session setup
 
@@ -209,6 +220,110 @@ Link an X account to your key once, so the account-only reads and write actions 
 | `twitter_user_login` | Log in with `username` + `password` (+ `totp_secret` for 2FA); stores the session against your key. Returns a confirmation, never the cookies |
 
 ## Upstream attribution
+
+### Search for trending AI tweets
+
+> "Find the most popular tweets about AI agents posted this week"
+
+The agent calls `twitter_advanced_search` with:
+```
+query: "AI agents min_faves:200 since:2024-01-01"
+product: "Top"
+count: 20
+```
+
+### Pull a user's recent posts
+
+> "Get the last 10 tweets from @sama"
+
+The agent calls `twitter_user_tweets` with:
+```
+username: "sama"
+count: 10
+```
+
+### Read a full thread
+
+> "Get the full thread for this tweet: https://x.com/karpathy/status/1849....."
+
+The agent calls `twitter_tweet_thread` with:
+```
+url: "https://x.com/karpathy/status/1849....."
+```
+
+### Paginate through followers
+
+> "List the first 100 followers of @openai, then the next 100"
+
+First call, `twitter_user_followers`: `{ username: "openai", count: 100 }`
+Second call, pass back the `cursor` from the first response: `{ username: "openai", count: 100, cursor: "<cursor from response>" }`
+
+### Paging `twitter_user_tweets_complete`
+
+> "Pull @elonmusk's whole tweet history"
+
+`twitter_user_tweets_complete` auto-paginates server-side and returns a large batch per call, but it does **not** guarantee the full history in one call. Read the result like this:
+
+- **`next_cursor` is the completion signal, not `count`.** Non-null means the history is truncated and more remains. Null means it is genuinely exhausted. The response also carries `has_more`, the same signal as a boolean.
+- **`max` is a minimum target, not a cap.** Pages arrive in whole chunks, so a response may hold up to one page (<=100) more than requested. Live behaviour: `max=10` returned 20, `max=50` returned 60, `max=150` returned 161, and omitting `max` (server default **200**) returned 201. Never assume `count === max`.
+- **Each call also has a server-side wall-clock budget**, so a response can be truncated even when it returned fewer tweets than requested. That is the second reason `count` cannot tell you whether you are done.
+- **Billing is a flat $0.0024 per call**, regardless of how many tweets come back, so fewer large calls cost less than many small ones.
+
+To resume, pass the `next_cursor` straight back in as `cursor` and repeat until it comes back null:
+
+First call, `twitter_user_tweets_complete`: `{ user_id: "44196397", max: 800 }`
+Then, while `next_cursor` is non-null: `{ user_id: "44196397", max: 800, cursor: "<next_cursor from previous response>" }`
+
+### Monitor brand mentions
+
+> "Show me recent tweets mentioning @twitterapis"
+
+The agent calls `twitter_user_mentions` with:
+```
+username: "twitterapis"
+count: 50
+```
+
+## Troubleshooting
+
+**`HTTP 401 (invalid or missing API key)`** Check that `TWITTERAPIS_KEY` is set correctly in your MCP client config and matches the key shown in your [dashboard](https://www.twitterapis.com/dashboard).
+
+**`HTTP 402 (insufficient credits)`** Top up at [twitterapis.com/dashboard](https://www.twitterapis.com/dashboard). Your first $0.50 is free at signup.
+
+**`HTTP 403 (access forbidden)`** The account or tweet may be private/protected, or your plan does not include this endpoint.
+
+**`HTTP 404 (not found)`** The user, tweet, or list may have been deleted, suspended, or the id/handle is wrong.
+
+**`HTTP 429 (rate limited)`** Wait a few seconds and retry. If you hit this frequently, add `"TWITTERAPIS_TIMEOUT_MS": "60000"` to your env config and space out bulk requests.
+
+**`Request failed: timed out after 30000ms`** The default timeout is 30 s. For large paginated fetches set `TWITTERAPIS_TIMEOUT_MS` to a higher value (e.g. `60000`).
+
+**Tools do not appear in Claude / Cursor** Ensure `npx` is on your PATH and Node.js 18+ is installed (`node --version`). Check MCP client logs for startup errors.
+
+## Pricing
+
+Calls are billed to your twitterapis.com account. Almost every endpoint is $0.0008/call: all reads (search, profiles, tweets, followers, likes) plus the simple write actions (like, retweet, bookmark, follow and their undos, delete). At the read rate that works out to $0.04 per 1,000 tweets, since each call returns about 20 tweets. The premium endpoints cost a little more: tweet creation, sending a DM (`twitter_dm_send`), and DM reads (`twitter_dm_list`, `twitter_dm_conversation`) at $0.0016/call, full tweet history (`twitter_user_tweets_complete`) at $0.0024/call, a full tweet thread (`twitter_tweet_thread`) and a Grok answer (`twitter_grok_chat`) at $0.004/call, and the article-editing writes (`twitter_article_create`, `twitter_article_update_title`, `twitter_article_update_cover_media`, `twitter_article_update_content`, `twitter_article_publish`, `twitter_article_unpublish`) at $0.0016/call (`twitter_article_get`, `twitter_article_list`, and `twitter_article_delete` stay at the standard $0.0008/call). Your first $0.50 is free. See [twitterapis.com/pricing](https://www.twitterapis.com/pricing).
+
+## Links
+
+- Docs: [docs.twitterapis.com](https://docs.twitterapis.com)
+- Dashboard / API keys: [twitterapis.com/dashboard](https://www.twitterapis.com/dashboard)
+- Pricing: [twitterapis.com/pricing](https://www.twitterapis.com/pricing)
+- REST API base URL (call it directly, without MCP): `https://api.twitterapis.com`
+
+## FAQ
+
+**Do I need an X (Twitter) developer account?** No. Get an API key at [twitterapis.com/signup](https://www.twitterapis.com/signup); there is no application or approval step.
+
+**Is it read-only?** It exposes 63 read tools and the four approved actions listed above. The other 32 upstream write actions are not registered.
+
+**Which clients are supported?** Claude Desktop, Cursor, Windsurf, and VS Code (Copilot agent mode), or any Model Context Protocol client.
+
+**How is it billed?** Per request. New keys start with $0.50 in free credits, no card required. See [pricing](https://www.twitterapis.com/pricing).
+
+**Does it store my key or data?** No. The server holds no state and forwards your API key on each call.
+
+## Maintainers
 
 This fork is based on [TwitterAPIs/twitterapis-mcp](https://github.com/TwitterAPIs/twitterapis-mcp). It keeps the upstream MIT license, tool catalog, and TwitterAPIs behavior.
 

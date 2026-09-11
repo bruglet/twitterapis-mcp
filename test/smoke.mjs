@@ -192,7 +192,7 @@ try {
     const lists = await Promise.all(clients.map(({ client }) => client.listTools()));
     for (const list of lists) {
       const names = new Set(list.tools.map((tool) => tool.name));
-      assert.equal(list.tools.length, 65, "tools/list exposes 65 approved tools");
+      assert.equal(list.tools.length, 67, "tools/list exposes 67 approved tools");
       assert.deepEqual(
         names,
         new Set(REGISTERED_TOOLS.map((tool) => tool.name)),
@@ -200,7 +200,7 @@ try {
       );
       assert.ok(
         TOOLS.filter((tool) => !tool.write).every((tool) => names.has(tool.name)),
-        "tools/list exposes all 61 read tools",
+        "tools/list exposes all 63 read tools",
       );
       assert.ok(
         [...allowedWriteTools].every((name) => names.has(name)),
@@ -209,7 +209,7 @@ try {
       assert.ok(
         TOOLS.filter((tool) => tool.write && !allowedWriteTools.has(tool.name))
           .every((tool) => !names.has(tool.name)),
-        "tools/list hides the other 30 write tools",
+        "tools/list hides the other 32 write tools",
       );
       assert.ok(list.tools.every((tool) => tool.name && tool.inputSchema?.type === "object"));
     }
