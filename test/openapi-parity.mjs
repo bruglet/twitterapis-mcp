@@ -18,6 +18,8 @@
 // reading either copy alone cannot see.
 
 import { TOOLS } from "../src/tools.js";
+import { resolveParam } from "../scripts/gen-tools-endpoints.mjs";
+import { LEAD_PATHS } from "../scripts/openapi-lead.mjs";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -54,6 +56,9 @@ const key = (method, path) => `${method.toUpperCase()} ${path}`;
 const templateParams = (p) => [...p.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
 
 async function loadOpenapi() {
+  // OPENAPI_FILE: check against a docs BRANCH's spec, so a cross-repo batch is built
+  // and tested before the docs deploy (same override as scripts/openapi-refresh.mjs).
+  if (process.env.OPENAPI_FILE) return JSON.parse(readFileSync(process.env.OPENAPI_FILE, "utf8"));
   try {
     const res = await fetch(OPENAPI_URL, { signal: AbortSignal.timeout(15000) });
     if (res.ok) return await res.json();
@@ -73,7 +78,10 @@ function openapiIndex(oa) {
     const tParams = templateParams(p);
     for (const [method, op] of Object.entries(ops)) {
       if (method !== "get" && method !== "post" && method !== "delete") continue;
-      const params = new Set((op.parameters || []).map((x) => x.name));
+      // Shared params arrive as $ref (docs components.parameters, 2026-09-23);
+      // the same resolver the generator uses, so the two gates cannot disagree
+      // about what a param is called. Fail-closed on a ref the spec lacks.
+      const params = new Set((op.parameters || []).map((x) => resolveParam(x, oa.components, `${method.toUpperCase()} ${p}`).name));
       for (const name of tParams) params.add(name);
       const rb = op.requestBody?.content?.["application/json"]?.schema?.properties || {};
       for (const k of Object.keys(rb)) params.add(k);
@@ -85,6 +93,18 @@ function openapiIndex(oa) {
 
 async function main() {
   const oa = await loadOpenapi();
+  // A route the docs spec has not published yet is read from the vendored snapshot,
+  // and only a path named in LEAD_PATHS (scripts/openapi-lead.mjs). Any other gap
+  // between the docs spec and the catalog stays a failure.
+  const vendored = JSON.parse(readFileSync(SNAPSHOT, "utf8"));
+  const borrowed = [];
+  for (const p of LEAD_PATHS) {
+    if (oa.paths[p]) continue;
+    if (!vendored.paths[p]) throw new Error(`LEAD_PATHS names ${p}, which the snapshot does not carry`);
+    oa.paths[p] = vendored.paths[p];
+    borrowed.push(p);
+  }
+  if (borrowed.length) console.log(`  openapi-parity: ${borrowed.length} lead path(s) read from the snapshot: ${borrowed.join(", ")}`);
   const oaIdx = openapiIndex(oa);
   const oaKeys = new Set(Object.keys(oaIdx));
   const problems = [];

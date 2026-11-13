@@ -80,7 +80,7 @@ const spec = JSON.parse(readFileSync(SNAPSHOT, "utf8"));
 // gen-tools-endpoints.mjs, kept as its own module so this exact logic (a DELETE
 // method, and two methods on one path) is unit-testable against a synthetic
 // route table, see test/gen-tools-endpoints.mjs.
-const { endpoints: ENDPOINTS, methodsByPath: METHODS_BY_PATH } = buildEndpoints(spec.paths);
+const { endpoints: ENDPOINTS, methodsByPath: METHODS_BY_PATH } = buildEndpoints(spec.paths, spec.components);
 
 // ── 2. Resolve overrides against the spec ────────────────────────────────────
 // The MCP tool path carries the /twitter prefix the spec omits, except for the
@@ -232,9 +232,9 @@ for (const t of TOOL_OVERRIDES) {
     if (!a.describe || a.describe.length < 10) {
       bad(`tool ${t.name} arg "${a.name}" has no usable description; a model reads this to decide how to call the tool`);
     }
-    if (type === "json" && !t.jsonBody) {
+    if ((type === "json" || type === "json_array") && !t.jsonBody) {
       bad(
-        `tool ${t.name} arg "${a.name}" is type:"json" but the tool is not jsonBody:true; a non-jsonBody ` +
+        `tool ${t.name} arg "${a.name}" is type:"${type}" but the tool is not jsonBody:true; a non-jsonBody ` +
           `tool sends args as query-string values, which cannot carry a real object.`,
       );
     }
@@ -287,7 +287,32 @@ for (const t of TOOL_OVERRIDES) {
     }
   }
 
-  resolved.push({ ...t, path, method, args: finalArgs, pathParams });
+  // Every tool names its docs page, so a model (and a directory reviewer) can follow it to
+  // the full reference. Derived from the spec, never hand-typed (feedback 538e90b5).
+  if (!ep.operationId || !ep.tag) bad(`tool ${t.name}: spec endpoint ${t.endpoint} has no operationId or tag, so its docs page cannot be named`);
+  const docsUrl = `https://docs.twitterapis.com/docs/reference/${String(ep.tag).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}/${ep.operationId}`;
+  // Every tool also states its cost, read from the spec rather than typed: the operation's
+  // x-cost-usd and the billing unit its own description names ("Cost: $0.0008 per call." or
+  // "... per billed item."). The two must agree, so a price change upstream that updates one
+  // and not the other fails the build instead of shipping a wrong number to a model.
+  const op = (spec.paths[t.endpoint] || {})[epMethod.toLowerCase()] || {};
+  const costMatches = String(op.description || "").match(/Cost: (?:Free per call|\$\d+(?:\.\d+)? per (?:call|billed item))\./g) || [];
+  const costUsd = op["x-cost-usd"];
+  let costSentence = null;
+  if (costMatches.length !== 1 || typeof costUsd !== "number") {
+    bad(`tool ${t.name}: spec ${epMethod} ${t.endpoint} needs exactly one "Cost: ..." sentence and a numeric x-cost-usd (found ${costMatches.length} sentence(s), x-cost-usd ${JSON.stringify(costUsd)})`);
+  } else {
+    costSentence = costMatches[0];
+    const stated = costSentence.startsWith("Cost: Free") ? 0 : Number(costSentence.match(/\$(\d+(?:\.\d+)?)/)[1]);
+    if (Math.abs(stated - costUsd) > 1e-9) bad(`tool ${t.name}: spec cost sentence "${costSentence}" disagrees with x-cost-usd ${costUsd}`);
+  }
+  if (/\bCost: /.test(t.description)) bad(`tool ${t.name}: the override description types its own "Cost:" sentence; the generator derives it from the spec`);
+  const description = `${t.description}${costSentence ? ` ${costSentence}` : ""} Docs: ${docsUrl}`;
+  // Per-call inline credentials (override args marked header:true: auth_token, ct0, ...).
+  // Emitted so a host can hide them (createServer({ inlineCredentials: false })) without
+  // touching a tool whose OWN payload is credentials, e.g. twitter_customer_session.
+  const headerArgs = args.filter((a) => a && a.header).map((a) => a.name);
+  resolved.push({ ...t, description, docsUrl, headerArgs, path, method, args: finalArgs, pathParams });
 }
 
 // Every spec endpoint needs a tool. This is the drift check that catches a route
@@ -333,6 +358,11 @@ function zodExpr(a) {
     // handler receives `typeof body.x === "string"` where it expects an
     // object and rejects the call. Only valid on a jsonBody:true tool.
     e = "z.record(z.string(), z.unknown())";
+  } else if (a.type === "json_array") {
+    // An array of JSON objects, for a param the handler requires to be a real
+    // array (grok/chat's messages: Array.isArray(body.messages)). Same reason as
+    // "json": a string here reaches the handler as a string and is dropped.
+    e = "z.array(z.record(z.string(), z.unknown()))";
   } else {
     e = "z.string()";
     if (a.minLength !== undefined) e += `.min(${a.minLength})`;
@@ -364,6 +394,7 @@ const body = resolved
     if (t.local) L.push(`    local: ${q(t.local)},`);
     const localArgs = t.args.filter((a) => a.local).map((a) => a.name);
     if (localArgs.length) L.push(`    localArgs: ${JSON.stringify(localArgs)},`);
+    if (t.headerArgs && t.headerArgs.length) L.push(`    headerArgs: ${JSON.stringify(t.headerArgs)},`);
     L.push("    description:");
     L.push(`      ${q(t.description)},`);
     if (t.args.length === 0) {

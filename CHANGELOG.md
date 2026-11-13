@@ -1,5 +1,515 @@
 # Changelog
 
+## 0.28.1 (2026-11-09)
+
+No new tools, so a patch release. Still 120 tools: 71 reads and 49 writes.
+
+### Changed
+
+- **`twitter_user_status` takes `username`**, the name every other handle tool takes, and still accepts `userName`. An agent chaining `twitter_user_status` into `twitter_user_tweets` no longer gets one of the two names wrong.
+- **`twitter_advanced_search` states the real default.** With `product` omitted the search is `Latest`, which is what the API has always done; the description used to say `Top`.
+- **`twitter_trends` says what `created_at` means.** It is when X generated the location's trend list (X refreshes it on its own schedule, so it can be a day old), `as_of` is when the API read it, and the new `list_age_seconds` field is the gap between the two.
+
+### Changed (tests)
+
+- The vendored snapshot is refreshed from the docs spec, which now lists `username` on `/user/status` and the trends freshness fields.
+
+## 0.28.0 (2026-11-05)
+
+Two new write tools, so a minor release. 120 tools: 71 reads and 49 writes.
+
+### Added
+
+- **`twitter_pin_tweet`** (POST /twitter/tweet/pin): pin one of your own tweets to the top of your profile, by `id` or `url`. Pinning replaces any existing pinned post; its annotations mark it destructive and idempotent. $0.0008 per call.
+- **`twitter_unpin_tweet`** (POST /twitter/tweet/unpin): unpin it again; the tweet stays posted. Destructive and idempotent. $0.0008 per call.
+- Both take the per-call inline credentials and `proxy_url`, like the other tweet actions.
+
+### Changed
+
+- **`twitter_article_publish` says what `caption` does.** The caption becomes the text of the announcement post that publishing creates, with no stated length limit (the 256-character claim is gone). `audience` accepts only `Everyone` (or `Public`) and `reply_control` only `Everyone`; any other value is refused with a 400. The tool and argument descriptions, the README row and the vendored spec say so; the spec now comes from the docs, which publish the same facts.
+- The residential egress playbook now counts 45 of the 52 session tools that take per-call credentials as headers.
+
+### Changed (tests)
+
+- `test/tools.test.mjs` counts move to 120 / 71 / 49.
+- `test/annotations.test.mjs` classes `unpin` and `_pin_` tool names as destructive.
+- The vendored snapshot is refreshed from the docs spec, which now publishes `/tweet/pin`, `/tweet/unpin` and the corrected `/article/publish`.
+
+## 0.27.0 (2026-11-05)
+
+Tool text and listings only. 118 tools: 71 reads and 47 writes.
+
+### Changed
+
+- `compact` on the 59 tools that take it: named `fields` are added on top of the preset, which is what the API has always done.
+- `twitter_community_tweets` `count` is a page-size hint, not a cap.
+- `twitter_tweet_thread` documents `is_partial`.
+- `twitter_feedback_get` returns the report's details and evidence.
+- npm and MCP Registry descriptions now cover communities, Grok and monitoring.
+
+## 0.26.0 (2026-11-04)
+
+Two new tools for the async Grok routes, so a minor release. 118 tools: 71 reads and 47 writes. It also carries two BREAKING schema changes: `count` on `twitter_blocking` and `twitter_muting` now tops out at 100, the API's own cap, so a call with a count from 101 to 200 that validated under 0.25.1 is now refused before it reaches the API; and `messages` on `twitter_grok_chat` is now an array of turn objects, so a string is refused at the schema.
+
+### Added
+
+- **`twitter_grok_chat_submit`** (POST /twitter/grok/chat/submit): start a Grok chat without holding the connection open. It takes the same arguments as `twitter_grok_chat` and answers 202 at once with a `job_id`, for clients that stop waiting before a search-grounded answer arrives (that answer can take up to 90 seconds). At most 5 jobs per API key can be pending at once. Free.
+- **`twitter_grok_chat_result`** (GET /twitter/grok/chat/result): read a job by `job_id`: 202 while pending, 200 with the Grok chat reply plus `job_id` and status `done`, or the error the buffered call would have answered. A finished answer is kept for 15 minutes. The call is free; the $0.004 Grok chat price is charged once, on the poll that first delivers the answer, and a failed, timed-out, interrupted or never-collected job costs nothing. It needs only the API key that submitted the job, so it takes no X session arguments.
+- A 404 from `twitter_grok_chat_result` carries its own hint, and the server instructions route a long Grok chat to the pair.
+
+### Fixed
+
+- **`twitter_grok_chat` now delivers `messages` (BREAKING: string to array).** The API reads prior turns only from a JSON body, as a real array, and the tool sent every argument in the query string, so a multi-turn call lost its history without an error. The tool now sends a JSON body, and `messages` is an array of turn objects; a string is refused at the schema. A string never reached the API as history under 0.25.1 either, so no call that used to work stops working.
+- **`twitter_article_update_title`, `twitter_article_update_cover_media` and `twitter_article_update_content` no longer say they work on a published article.** Edits are verified on drafts only. When X refuses an edit and the article is among the first 100 published articles X lists for the account, the API answers 422 `article_published` and does not bill the call. The descriptions say so, and say that the unpublish, edit, republish path the error names is not verified end to end.
+- **`twitter_grok_config` is priced free.** Billing has always charged $0 for it, but the description said $0.0008 per call. The vendored spec snapshot now carries `x-cost-usd` 0, the description says "Cost: Free per call." and the README names it among the free tools.
+- **`twitter_media_status` no longer promises video and GIF processing.** The media upload accepts base64 images only, and an image has no processing step on X, so its media_id is usable as soon as the upload returns. The description and the README now say so, and no longer suggest polling before tweeting an image. The README article rows now say draft only, with the 422 `article_published` note.
+- **`count` on `twitter_blocking` and `twitter_muting` describes accounts, not tweets (BREAKING: max 200 to 100).** Both tools return users, and the old text described a tweet search page. It now says 20 by default, capped at 100, matching the API reference, and the schema maximum drops from 200 to 100.
+
+### Changed (tests)
+
+- `test/tools.test.mjs` counts move to 118 / 71 / 47 and gain checks on the Grok pair: the shared body, `messages` as a real array sent in the JSON body, the result tool's two arguments, and the 404 hint.
+- New `scripts/openapi-lead.mjs` lists the spec paths this package carries ahead of the docs spec (the Grok pair, `/grok/config` with its free price, and `/grok/chat`, whose `messages` the snapshot types as an array of { role, content } turns, as on the submit route). `openapi:refresh` keeps those vendored entries, and `test/openapi-parity.mjs` reads a listed path from the snapshot while the docs spec lacks it. Any unlisted gap still fails. The rest of the snapshot is refreshed from the docs spec.
+
+## 0.25.1 (2026-11-01)
+
+A patch: no tool, argument or schema changed.
+
+### Fixed
+
+- **`twitter_tweet_thread` no longer says any tweet in a thread returns the whole thread.** `/twitter/tweet/thread` reads forward from the tweet you pass and does not walk backwards, so a later tweet returns only the tail of the thread. The description now says to pass the thread's first tweet, whose id is the `conversation_id` every tweet in the thread carries, and the README says the same.
+- **One top-up link on an out-of-credits result.** The API's 402 body now carries its own `top_up_url`, and the result echoed it beside the payload's `action_url`, so an agent saw two different buy-credits links. The echo now drops the API's link and the payload keeps one, with the API's whole-dollar `amount` prefill carried over when it comes from the real buy-credits page and sits inside the page's $10 to $5,000 range. A host or URL from a response body is never copied into a link the result hands out. `test/paywall.test.mjs` covers it (fails on 0.25.0).
+
+## 0.25.0 (2026-10-20)
+
+Three new tools for three API routes, so a minor release. 116 tools: 70 reads and 46 writes.
+
+### Added
+
+- **`twitter_community_join`** and **`twitter_community_leave`** (POST /twitter/community/join, /twitter/community/leave): join or leave an X Community as your own linked X session, by numeric `community_id`. One upstream call each, nothing read first. A 200 returns `ok`, `action`, `community_id`, `status` (`joined` or `left`) and `community`, which holds only the keys X sent back (or null). Refusals keep the same fields, add an error code and are not billed: 409 `join_requires_approval` (a community that needs moderator approval; no join request is submitted), 409 `already_member` / `not_member`, 404 `community_not_found`, 403 `account_suspended` / `account_locked`, 422 `write_not_applied`. $0.0008 per call. Leave is marked destructive.
+- **`twitter_creator_commentary_video`** (GET /twitter/creator/commentary_video): who posts native video about a topic. One search page for `<query> filter:native_video`, grouped by author into a ranked `creators` list with video and quote post counts, total and median views, median replies and quotes, and up to three top post ids each. Skipped posts are counted per reason (retweet, no video, no author, below `min_views`), and the ranking rule comes back as text in every response. Takes `query`, `min_views`, `product` (`Top` or `Latest`), `count` (1 to 20), `cursor`, plus `fields` and `compact`. $0.0008 per call.
+
+### Changed (tests)
+
+- `test/tools.test.mjs` counts move to 116 / 70 / 46 and gain two checks: the community writes are POST session writes taking only `community_id` plus the inline credentials (leave destructive, join not), and the creator read enforces a required `query`, `product` Top|Latest, `count` 1 to 20 and a non-negative `min_views`.
+
+## 0.24.2 (2026-10-20)
+
+A wording-only patch: no tool, argument or schema changed.
+
+### Changed
+
+- **`twitter_list_timeline` now says `count` is a page-size hint, not a cap.** X's native List feed sets its own page size and can return more posts than asked for (a page of 113 for count=5 was observed). The server returns every post so `next_cursor` skips none; keep the first N yourself if you need fewer. Same wording as the API reference.
+
+## 0.24.1 (2026-10-20)
+
+A wording-only patch: no tool, argument or schema changed.
+
+### Changed
+
+- **Tool descriptions, the provenance resource and the README no longer describe how reads are sourced.** Community, monitor and list descriptions now say what the caller gets ("a public read that needs no session", "acts as your own account", "monitoring capacity") instead of naming internal plumbing. The provenance `served_by` value for a key-only call is now "the API key alone (a public read, no linked account)", and the paywall answer counts "public reads".
+- **A new check, `test/sourcing-disclosure.mjs`, runs in `npm test`** over everything the package ships and fails on that class of wording, so it cannot come back.
+
+## 0.24.0 (2026-10-19)
+
+Released to npm as 0.24.0: the README pricing fix below plus MCP prompts, a new capability, which makes this a minor release.
+
+### Added (prompts)
+
+- **One prompt per playbook.** `prompts/list` used to answer "Method not found". It now lists the five playbooks (launch-day monitor, competitor-follower outreach, account audit, link an X account, residential egress), each with the playbook's own title and description. `prompts/get` hands the playbook over as an embedded resource, byte-for-byte what `resources/read` serves, plus a closing line. Launch-day monitor, competitor-follower outreach and account audit take one optional `handle` (an X handle, a leading @ is fine, empty means none).
+- **`prompts/get` without an `arguments` field works.** The field is optional in MCP, so a call that leaves it out gets the plain prompt instead of an invalid-arguments error.
+- **Prompt and prompt-argument descriptions are held to the same listed-text rules as tools and resources** in `test/description-compliance.mjs`.
+
+### Fixed (README only)
+
+- **The Pricing section no longer contradicts itself.** It called the draft and scheduled lists "the two reads that are not at the read rate" in the same sentence that priced the two DM reads at $0.0016, and it never priced `twitter_tweet_replies_complete` ($0.0024), `twitter_list_create` ($0.0016), `twitter_create_tweet` ($0.0016) or `twitter_user_login` ($0.01). It is now a table of every tool priced differently from the standard $0.0008 per call, each price read from the tool's own description. The opening and the FAQ say "most reads" and "standard reads" instead of claiming every read costs $0.0008.
+
+### Added (tests)
+
+- **`test/readme-prices.mjs`, wired into `npm test`.** Fails when a price the README states for a named tool (pricing table, prose, tool rows that say free, the provenance example) disagrees with the `Cost:` sentence the package ships in `src/tools.js`, when a tool priced above the standard rate has no stated price, or when a claim about all reads or a count of off-rate reads is false. Run against the 0.23.0 README it reports 12 findings.
+- **The price gate fails closed on shapes it cannot attribute.** A sentence that ends with a tool still waiting for a price it holds ("At $X per call: `tool`."), a tool-table row whose later cells state a price, and a table whose price column is not the first now all go through the same check, and a row that names a tool and a price in any other shape fails. `test/readme-prices.redtest.mjs`, wired into `npm test`, plants each of those three shapes with a wrong price and asserts the gate fails, beside a clean README that must pass.
+
+## 0.23.0 (2026-10-16)
+
+Released to npm as 0.23.0: the 0.22.2 and 0.22.3 changes below plus the new tool, which makes this a minor release (the version-class gate refuses a patch that adds a tool).
+
+### Changed (twitter_tweet_quotes description)
+
+- **`twitter_tweet_quotes` says when search withheld quotes.** The endpoint now returns `quote_count` (the tweet's real total) and `coverage` (`complete`, `partial` with a `coverage_hint`, or `unknown`) beside the rows, so a page that is empty with `has_more` false on a tweet that has quotes reads as withheld rather than as no quotes. The description now explains both fields.
+- **`count` on `twitter_tweet_quotes` is documented as at most 20 per page.** X serves at most 20 quotes per search page; the old text said up to 100. A larger value is still accepted and is clamped to 20, echoed as `requested_count` and `effective_count`. Schema unchanged (1-100), so no existing call starts failing.
+
+### Changed (README only)
+
+- **README opening rewritten for the listings** that copy it word for word (Glama, mcpservers.org, the MCP Registry, npm): one paragraph on what the server does and costs, then the install line, the hosted sign-in line and the website. Three FAQ answers replace the old developer-account answer. No tool, schema or behaviour change; 113 tools.
+- `test/readme-opening.test.mjs` (in `npm test`) holds the opening to the package name, keeps its Website line equal to `server.json` `websiteUrl`, checks every "N tools" claim in the README against `src/tools.js`, and fails when the version differs across `package.json`, `server.json` and `manifest.json`.
+
+
+### Added
+
+- **`twitter_tweet_replies_complete`**, every direct reply under a tweet in one call: the server walks the reply pages and returns `{ count, next_cursor, has_more, is_complete, pages_fetched, sort, tweets }`. `is_complete` is the completion signal; when false, pass `next_cursor` back as `cursor`. Optional `max` (default 500) and `sort`. Flat per call. 113 tools, 69 reads.
+- **`sort` on `twitter_tweet_replies`**: `relevance` (default), `latest` or `likes`, matching the endpoint.
+- **A title and all four annotation hints on every tool** (MCP spec 2025-06-18 `ToolAnnotations`).
+  Each of the 113 tools now carries a short Title Case `title` (for example "Delete Tweet",
+  "Advanced Tweet Search") in place of its raw name, plus `readOnlyHint`, `destructiveHint`,
+  `idempotentHint` and `openWorldHint`. Reads are read-only and idempotent; writes that delete,
+  unpublish, remove, unfollow or overwrite (a profile field, an image, a draft or article body, a
+  stored session, a monitor's settings) are destructive; likes, follows, bookmarks and deletes by id
+  are idempotent; account, billing, feedback, monitor and webhook configuration tools are
+  closed-world, since they touch only this service. `idempotentHint` was not set before, and
+  `openWorldHint` was `true` on every tool. The table is `src/annotations.js`;
+  `test/annotations.test.mjs` reads `tools/list` over a real client and fails when any tool lacks a
+  title or a hint, or when a hint contradicts the catalog's read/write and destructive flags. Tool
+  names, input schemas and behaviour are unchanged.
+- **Playbooks over the MCP resource primitive.** `resources/list` now carries five recipes an
+  agent runs with the tools this package already has: `playbook://launch-day-monitor`,
+  `playbook://competitor-follower-outreach`, `playbook://account-audit`,
+  `playbook://link-x-account` and `playbook://residential-egress`. A resource is fetched only
+  when a client asks for it, so none of this costs context until it is read, and none of it costs
+  credits. Registering them makes the server advertise the resources capability for the first
+  time.
+- **Row provenance**, `provenance://tool/{tool_name}`, a resource template returning where a row
+  came from: the REST endpoint and method, read or write, whether the call ran as the caller's
+  linked X account or on the API key alone, the per-call price and the docs URL. All
+  of it is derived from the committed catalog. Row-level upstream facts (when the service read it
+  from X, whether an upstream cache answered, which account read it) are not in any response this
+  package receives, so they are reported as absent rather than guessed.
+
+### Changed
+
+- **A blocked call now answers with the sequence, not a sentence.** The structured payload for a
+  missing key, a rejected key, an empty balance and a missing X session gains an ordered `steps`
+  list and an `unlocks` line. The session payload is the one that changes most: step 1 is the free
+  status read, because a session X has rejected is filtered out of the lookup and fails exactly
+  like one that never existed, so nothing else can tell the two apart; the password route states
+  its 120-second server-side ceiling against the 30-second default call timeout and that a
+  two-factor account needs `totp_secret` in the same call; and `cannot_retry` names the outcomes
+  (locked, suspended, confirmation pending, emailed code) that have to be cleared on x.com.
+- **The playbook and provenance gates were strengthened after review.** The first pass
+  asserted that every tool a playbook names exists, which is blind to a tool that exists and
+  does not do what the recipe says. Three defects got through it: a health step reading field
+  names this API never returns, a monitor step offering a keyword to a handle-only tool, and a
+  provenance record relabelling the three per-billed-item prices as "per call", understating one
+  batch call by up to 100x. `test/playbooks.test.mjs` now requires every snake_case identifier a
+  playbook quotes to appear in the catalog, checks the monitor step against the tool's real
+  argument shape, and compares every tool's reported cost against its own cost sentence including
+  the unit. All three are red-tested against the exact defect they missed.
+- **The Connectors Directory gate now reads resource and template descriptions too.**
+  `test/description-compliance.mjs` audited tool descriptions only, which was the whole listed
+  surface until this release. Resource bodies stay exempt: they are returned only for a URI the
+  caller asked for by name, the way the server instructions are, and `test/playbooks.test.mjs`
+  holds them to their own rules instead (every tool they name must exist, and no hidden text).
+
+
+## 0.22.1 (2026-10-02)
+
+### Changed
+
+- **Feedback reports no longer ask for the user's words.** `twitter_feedback_send` `details` is
+  three bullets (What happened, Repro, Evidence), optionally after a one-line summary of the goal,
+  and the server instructions say the same: no quote of the conversation is collected, per the
+  Connectors Directory rule against extraneous conversation data.
+- **The description gate refuses conversation-data asks** (what the user said, verbatim user
+  words) in descriptions and instructions, and now also sees bare hosts, backslash authorities,
+  emails, IP addresses and javascript:/data: schemes.
+
+## 0.22.0 (2026-10-02)
+
+### Changed
+
+- **Tool and parameter descriptions state product facts only.** Every description now says
+  what the tool returns, takes and costs, and nothing else: no instructions to the model
+  (should, never, always, ask the user, use X instead), no other tool's name, and no hidden
+  or encoded text, as the Claude Connectors Directory requires. Tool names, parameters,
+  schemas, annotations and behaviour are unchanged.
+- **Guidance moved into the server instructions.** Which tool to pick, how one tool's output
+  feeds another (user_id, conversation_id, woeid, media_id), the confirm-before-publishing
+  rule for articles and the feedback-drafting policy now live in the MCP `instructions`
+  string, which the client hands its model alongside the tool list. It is held to 2048
+  characters (Claude Code truncates past that), with the feedback consent rule first.
+- **Every description states its cost** (`Cost: $0.0008 per call.`, `... per billed item.`
+  or `Free per call.`), derived from the spec's `x-cost-usd` and its billing unit, never
+  hand-typed; the build fails if the two disagree.
+- `twitter_grok_chat` says plainly that its reply is text and JSON only, with no image field,
+  and `image_count` says a generated image is not returned.
+
+### Added
+
+- **`test/description-compliance.mjs`** (in `npm test`, or `npm run check:description-compliance`).
+  Lists every tool through `createServer` and an in-memory MCP client, in both the stdio and
+  hosted (`inlineCredentials: false`) modes, and fails on any tool or parameter description
+  that names another tool, matches a model-instruction pattern, or carries zero-width, bidi
+  or encoded text, or links to any host other than twitterapis.com and its docs host. It also
+  checks that the server instructions name only real tools, fit 2048 characters in both
+  modes, and carry the send-consent and no-secrets rules inside that window.
+
+## 0.21.1 (2026-10-01)
+
+### Changed
+
+- **Every tool description ends with its docs page** (`Docs: https://docs.twitterapis.com/docs/reference/<tag>/<operationId>`),
+  derived from the OpenAPI spec by the generator, never hand-typed. All 112 URLs verified live.
+
+### Added
+
+- **`createServer({ inlineCredentials: false })`.** Hides the per-call X session args
+  (auth_token, ct0, proxy_url, user_agent) from every tool on a hosted, directory-listed
+  server, and drops them from calls even if a client sends them. Callers bind their session
+  once with `twitter_customer_session`, whose own credential payload is unaffected. Default
+  `true`, so the stdio package is unchanged. Each tool now carries `headerArgs`.
+
+## 0.21.0 (2026-10-01)
+
+### Added
+
+- **`twitter_trends` category gains `for_you` and `business_and_finance`.** `for_you` reads
+  X's For you Explore tab. `business_and_finance` is not a tab (X serves none): it reads the
+  Trending and News tabs and returns only the ranked trends X itself labels "Business and
+  finance", re-ranked, never story items. Category results reflect the Explore view of the
+  account the API reads with.
+
+## 0.20.0 (2026-10-01)
+
+### Added
+
+- **`twitter_trends` reads X's Explore topic tabs.** New `category` input: trending, news,
+  sports or entertainment. A category response echoes `category`, has `location` null, and
+  lists X's ranked trends first, then the tab's story items (AI-written headlines X marks)
+  with `is_ai_story: true`, the headline as `query`, an x.com/i/trending link and the post
+  count as `tweet_volume`. It cannot be combined with `country` or `woeid`.
+
+## 0.19.1 (2026-10-01)
+
+### Changed
+
+- **`twitter_dm_list` says what it may not return**: conversations X has moved to
+  end-to-end encrypted chat may not appear, and neither may conversations still in
+  message requests.
+
+## 0.19.0 (2026-10-01)
+
+### Added
+
+- **`twitter_check_follow_relationship_batch`.** One account against up to 100 others
+  in one call, in either direction: fix a source and list targets, or fix a target and
+  list sources (which of these accounts follow the brand). Relationship is always from
+  the source's side. Billed per pair answered with a relationship.
+- **`twitter_audience_summary`.** Samples up to 100 followers or retweeters and returns
+  a country histogram from the About data plus a likely-bot share from documented
+  profile signals.
+
+### Changed
+
+- **`twitter_check_follow_relationship` takes usernames too** (`source_username`,
+  `target_username`), as the API already did.
+
+## 0.18.0 (2026-10-01)
+
+### Added
+
+- **`twitter_user_about_batch`.** The About object (account country, how the account
+  was created, username-change history, verification) for up to 100 accounts in one
+  call, by `usernames` or `user_ids`. Results come back in request order, each with
+  an `about` object or an error code. Billed per account X answered for; items that
+  failed on our side are free and safe to retry. Takes `fields` and `compact` like
+  every other read.
+
+## 0.17.0 (2026-09-30)
+
+### Added
+
+- **`paid_promotion` on the 17 tweet-list tools.** `"only"` keeps tweets X labels
+  Paid partnership (`is_paid_promotion` true), `"exclude"` keeps the rest. It filters
+  the page the API returned, so `next_cursor` still pages on, and the response carries
+  `paid_promotion_filter { mode, kept, removed }`. Same cost as without it.
+
+## 0.16.1 (2026-09-29)
+
+### Changed
+
+- **A restart answered in JSON is ridden out too.** The gateway now answers a
+  restart with a JSON 503 (`"error": "gateway_restarting"`, `Retry-After`)
+  instead of its HTML page; a read retries on either. Any other JSON 503 from
+  the API, and that code on any other status, is still never retried.
+- **A cancelled call stops.** When the MCP client cancels a tool call, the
+  request in flight is aborted and the wait before a retry ends at once; the
+  result says "Request cancelled by the caller." instead of reporting a timeout.
+
+## 0.16.0 (2026-09-29)
+
+### Changed
+
+- **A read rides out an API restart.** A read (GET) that gets the gateway's
+  HTML 502/503, or a refused connection, is retried after 3 and
+  then 8 seconds, so a deploy restart no longer surfaces as a Bad Gateway error.
+  The API's own JSON errors, gateway timeouts, DNS or TLS failures
+  and every write are never retried, so a request the API may already have
+  handled is not sent twice.
+- `twitter_tweet_quotes` explains the Top fallback: an empty first Top page is
+  served from Latest (`product_used`, `top_fallback`) and its `next_cursor`
+  keeps paging that list.
+
+## 0.15.0 (2026-09-29)
+
+### Added
+
+- **Agent-actionable paywall.** A missing key, a rejected credential (401
+  unauthorized), an empty balance (402 insufficient_credits) and a missing or
+  expired X session (409 session_required, 401 session_dead) now return a structured payload
+  instead of a prose hint: `needs` (`account`, `valid_key`, `credits` or
+  `x_session`), the page to send the user to (`action_url`: signup, dashboard,
+  buy credits) or the tool to call next (`next_tool`: twitter_user_login), and
+  one sentence the agent can relay, both in the text and as `structuredContent`.
+  Other failures keep their existing hints.
+
+## 0.14.0 (2026-09-29)
+
+- **`@twitterapis/mcp/server` export and `authHeaders`.** The package now
+  exports `createServer` at `@twitterapis/mcp/server`, so a host can serve the
+  same tools remotely. `createServer({ authHeaders })` authenticates each call
+  with headers the host supplies instead of an API key, for a host that has
+  already authenticated the caller another way (an OAuth token resolved to an
+  account). Without it, behavior is unchanged: the API key is sent as before.
+  The `exports` map keeps `.` (the stdio entry) and `./package.json`.
+
+- **Per-caller server state.** The server is now built by `createServer()` in
+  `src/server.js`, which holds the API key and the last-failed-call record in
+  its own closure instead of module globals. Under stdio nothing changes (one
+  process, one caller); it is the prerequisite for serving the same tools
+  remotely, where one process serves many callers and a global would send one
+  caller's requests with another's key. `src/index.js` is now only the stdio
+  entry and the one place config is read from the environment.
+  `test/per-caller-state.test.mjs` proves two servers in one process never
+  share a key or a failure record (red when `lastError` is hoisted back to
+  module scope).
+
+## 0.13.1 (2026-09-28)
+
+- **`twitter_user_search` no longer claims bio matching.** X's People search
+  matches display name and handle only; a term that appears only in a bio
+  returns no match (measured live 2026-09-28). The description and the `query`
+  arg now say so, and point to `twitter_user_followers` or
+  `twitter_advanced_search` plus a `description` filter for bio lookups. No
+  schema change; `test/openapi.snapshot.json` and the catalog baseline are
+  refreshed to the corrected docs SoT.
+
+## 0.13.0 (2026-09-23)
+
+- **Every data read takes `fields` and `compact`.** The API added response
+  projection on GET routes: `fields` keeps only the dotted paths you name
+  (applied to every object in the returned lists and to nested objects; the
+  pagination and envelope keys `next_cursor`, `cursor`, `has_more`, `count`,
+  `partial`, `error`, `message`, `reason` always survive, anything else at the
+  top level that you do not name is dropped), `compact` applies a built-in
+  preset (ids, url, text, created_at, lang, engagement counts, the
+  retweet/reply/quote flags, conversation ids, the author's id/username/name/
+  followers_count/verification, the quoted or retweeted tweet's id/url/author)
+  that, on its own, never turns a body into `{}`. 55 data-read tools gained the
+  pair (account, feedback, session-status, monitor and webhook reads return
+  their bodies unchanged); a model paying per token for a 40-tweet page is the
+  caller these were built for. Still 109 tools (65 reads, 44 writes), so a
+  MINOR for the new args rather than a new tool.
+- **`twitter_dm_conversation` pages backwards.** New optional `max_id`: pass the
+  previous page's `min_entry_id` (now returned at the root beside
+  `max_entry_id`) to walk a thread back in time. It must be a numeric entry id;
+  the API answers 400 for anything else instead of quietly returning page one.
+- **`twitter_follow_user` and `twitter_unfollow_user` take a `username`** as an
+  alternative to `user_id` (exactly one of the two). The API resolves the handle
+  on every call, never from a cache, so a renamed account is acted on by its
+  current handle.
+- The catalog generator resolves `$ref` parameters. The published spec now
+  declares its shared read parameters once under `components.parameters` and
+  references them from every GET; the generator and the openapi-parity gate read
+  those as a param named `undefined` and refused every read tool. Both now share
+  one resolver that fails closed on a ref the vendored spec lacks. The frozen
+  catalog baseline was regenerated in the same commit for review.
+
+## 0.12.0 (2026-09-13)
+
+- **Two new tools, 107 -> 109 (65 reads, 44 writes): `twitter_update_avatar` and
+  `twitter_update_banner`.** Both endpoints had been serving behind a feature flag
+  on the API and documented on no surface, because their upstream host was an
+  INFERENCE from the sibling profile write rather than an observation. Both have
+  now been called end to end against a live account, both success envelopes were
+  captured, and each write was confirmed applied by reading the profile back
+  through the GraphQL user lookup. The flag is deleted from the API entirely.
+- Each takes ONE field of base64-encoded image bytes (`image` / `banner`): not a
+  URL, not multipart, and NOT a `media_id` from `twitter_media_upload`. Both tool
+  descriptions say so in the first two sentences, because a model choosing between
+  these and the media-upload tool on the word "upload" alone will get it wrong.
+- Both descriptions also carry the two things a schema cannot: there is NO UNDO
+  and the vendor keeps no history, so read and save the current image URL first;
+  and confirm a banner write by reading `cover_picture` back specifically, since
+  at least one vendor endpoint reports that field as empty for accounts that
+  plainly have one.
+- Both are declared `jsonBody`, and here the API's "json-only" classification is
+  EXACT rather than conservative: the shared handler reads the JSON body and has
+  no query fallback at all, so a query string genuinely cannot work.
+
+## 0.11.1 (2026-09-13)
+
+### Fixed
+- `twitter_update_profile`: an empty string CLEARS a field. The tool description said
+  the opposite, and 0.11.0 shipped that to npm. It was true of the API when written
+  and stopped being true when the handler was fixed the same day.
+
+### Notes
+- A PATCH, not a minor: the catalog is unchanged at 107 tools, 65 reads and 42 writes.
+  Only description text moves, which `scripts/prepublish-version-class.mjs` confirms.
+- The claim is now verified the only way that works on this endpoint: by sending a
+  value that CHANGES and reading the profile back. The previous check used a
+  byte-for-byte no-op, which is the one test that cannot fail, since the profile looks
+  identical whether the write applied or was silently dropped.
+- Why it matters that this was wrong rather than merely vague: the old text told a
+  model that `description: ""` was a harmless no-op. After the handler fix, that exact
+  call blanks the field. A description that is confidently wrong about a destructive
+  operation is worse than one that says nothing.
+- Separately, writes to this endpoint are sometimes accepted upstream and sometimes
+  refused, and only some refusals are classified honestly. That is a defect under
+  repair on the API side, not part of this tool's contract, so it is deliberately not
+  written into the description.
+
+## 0.11.0 (2026-09-13)
+
+### Added
+- `twitter_update_profile` — change the display name, bio, location or link on the
+  account behind your session. The catalog goes 106 to 107 tools, 65 reads and 42
+  writes, still exact parity with the API's own endpoint count. A MINOR release
+  rather than a patch, so a consumer pinned to 0.10.x opts in rather than silently
+  receiving a new write tool.
+
+### Notes
+- It is a genuine PARTIAL update, tested rather than assumed: X's own client sends
+  the whole editable set on every save, so a form carrying only `name` is a shape
+  that client never produces. Measured against an account with a non-empty bio
+  before publishing: name only, HTTP 200, bio intact.
+- An empty string does NOT clear a field. The API trims empty values and treats
+  them as absent, so there is no way to blank a bio or a location through this tool
+  today. An earlier draft of this release documented the opposite; it was wrong and
+  was caught by an adversarial review running the shipped handler rather than
+  reading it.
+- `updated_fields` echoes the field names you SENT. It is not a diff, so a field you
+  set to the value it already held still appears in it.
+- The two sibling profile writes, avatar and banner, are deliberately not published:
+  neither has ever been called, and both need a real image upload.
+
+## 0.10.0 (2026-09-13)
+
+### Added
+
+- **Seven compose tools: private drafts and scheduled posts.** `twitter_draft_create`, `twitter_draft_edit`, `twitter_draft_delete`, `twitter_draft_list`, `twitter_scheduled_create`, `twitter_scheduled_delete`, `twitter_scheduled_list`. Catalog is now **106 tools, 65 reads and 41 writes**, still exact parity with the API's endpoint count. A MINOR bump, not a patch: the catalog grew, so a consumer pinned to `0.9.x` opts in rather than receiving seven new tools silently, which is exactly what `scripts/prepublish-version-class.mjs` refuses.
+- **The one thing a model cannot read off a schema is said in every one of the seven descriptions: a DRAFT is private and never posts; a SCHEDULED post WILL publish publicly at its `execute_at` unless it is cancelled first.** A model choosing between `twitter_draft_create` and `twitter_scheduled_create` on the word "create" alone gets it wrong, and the failure is a real post going out. The descriptions also carry the routing to their siblings (`twitter_create_tweet` to post now) and the `execute_at` unit trap: epoch SECONDS, never the milliseconds `Date.now()` returns, with a value at or above 1e12 refused by the API rather than scheduled tens of thousands of years out.
+- **Both list tools document `partial`.** True means X's answer was read but not fully understood; it is ABSENT on a clean read, so an empty array with no flag means the account genuinely has nothing. That distinction is what stops a model reporting "you have no drafts" when the real answer is "we could not read the reply".
+
+### Notes
+
+- The routes these tools call were built, merged and deployed on 2026-09-13 behind two env flags (`DRAFT_TWEETS_ENABLED`, `SCHEDULED_TWEETS_ENABLED`, both answering 503 while off), verified end to end against a real customer session, then published and their flags removed. The snapshot in `test/openapi.snapshot.json` was refreshed from the LIVE published spec after the docs site deployed, which is the only order that works: the refresh fetches `docs.twitterapis.com/openapi.json`, never a local file.
+
+## 0.9.9 (2026-09-11)
+
+### Changed
+
+- **The server instructions now ask for a control before an "ignored parameter" report.** A generic query on a score-ordered sort returns the site-wide listing, which reads exactly like a dropped parameter and is not one. Before drafting a report that a parameter is ignored or a field is empty, the model is told to re-run with a distinctive value that could only match if the parameter was honoured, and with the phrase quoted, then title the report by what the control showed.
+- **`scripts/prepublish-version-class.mjs`, run by `prepublishOnly`, refuses a patch bump when the tool catalog grew.** It reads the published tarball from npm, counts the catalog on both sides, and blocks a publish whose version is a patch over the published one while the catalog is larger. Fails closed when npm cannot be read. `--selftest` covers both directions offline.
+
 ## 0.9.8 (2026-09-04)
 
 ### Added
@@ -73,7 +583,7 @@ Catalog is now **94 tools: 60 reads and 34 write actions**.
 
   The two are separated by their PARAMETER SETS, not by their names, and each tool description says so and names the other, so a model picking between them cannot silently answer a different question than the one asked. A regression check in `test/tools.test.mjs` pins the difference so a later edit cannot harmonise it away.
 
-  Three writes that run on the CUSTOMER'S REGISTERED X SESSION rather than a pooled account, because a List belongs to a specific account:
+  Three writes that run on the CUSTOMER'S REGISTERED X SESSION rather than any other account, because a List belongs to a specific account:
   - **`twitter_list_create`** (POST /twitter/list/create): create a List with a `name` and an optional `description` and `is_private`. A List is public unless you explicitly ask otherwise, and a private List is not readable by the public List read tools.
   - **`twitter_list_add_member`** and **`twitter_list_remove_member`** (POST /twitter/list/add_member, /twitter/list/remove_member): add or remove one account on a List you own. Both return the List's `member_count` read back from X after the write, which is the field to check rather than `ok` alone: X returns a populated `errors[]` on 100% of successful calls to these ops, so the error array cannot tell you whether your write applied, while the count can. `member_count` is null when X returned no list object at all, which is itself the not-applied signal. A write that does not apply comes back with the SAME field layout plus a 422 and a machine-readable reason, and is not billed.
 
@@ -83,7 +593,7 @@ Catalog is now **94 tools: 60 reads and 34 write actions**.
 
 ### Added
 
-- **6 new reads: X Communities and tweet quotes.** `twitter_community_info` (one Community by numeric id: name, counts, join policy, rules, topic, banners, admin), `twitter_community_members` (the member roster, each row carrying that member's `Admin` / `Moderator` / `Member` role), `twitter_community_moderators` (moderators and admins from their own upstream operation, not a filter over the roster), `twitter_community_tweets` (the post timeline, with the pinned post returned as its own `pinned` field), `twitter_community_memberships` (the inverse lookup: every Community a given numeric `user_id` belongs to), and `twitter_tweet_quotes` (tweets that quote a tweet, with their text). The five Community reads are served by the account pool rather than by your session, which is why `role`, `can_join`, `is_pinned` and `viewer_relationship_type` come back null on them: those four describe the account that made the upstream call, and on a pooled read that is a rotating account you have never heard of. `twitter_tweet_quotes` is search-backed, so its `count` is what search returned rather than the tweet's true `quote_count`. The catalog moved to **86 tools: 55 reads and 31 write actions**. (This entry was written on 2026-08-17: the 0.8.0 release bumped the package version and shipped the tools but left no changelog entry behind it.)
+- **6 new reads: X Communities and tweet quotes.** `twitter_community_info` (one Community by numeric id: name, counts, join policy, rules, topic, banners, admin), `twitter_community_members` (the member roster, each row carrying that member's `Admin` / `Moderator` / `Member` role), `twitter_community_moderators` (moderators and admins from their own upstream operation, not a filter over the roster), `twitter_community_tweets` (the post timeline, with the pinned post returned as its own `pinned` field), `twitter_community_memberships` (the inverse lookup: every Community a given numeric `user_id` belongs to), and `twitter_tweet_quotes` (tweets that quote a tweet, with their text). The five Community reads are public reads that do not run as your session, which is why `role`, `can_join`, `is_pinned` and `viewer_relationship_type` come back null on them: those four describe the account that made the upstream call, and on a public read that account is not you. `twitter_tweet_quotes` is search-backed, so its `count` is what search returned rather than the tweet's true `quote_count`. The catalog moved to **86 tools: 55 reads and 31 write actions**. (This entry was written on 2026-08-17: the 0.8.0 release bumped the package version and shipped the tools but left no changelog entry behind it.)
 
 ## 0.7.8 (2026-08-16)
 
@@ -148,7 +658,7 @@ Catalog is now **94 tools: 60 reads and 34 write actions**.
 
 ### Removed
 
-- **`twitter_users_by_ids` removed from the tool list.** X refuses the batch `UsersByRestIds` lookup for the pooled cookie sessions this package's REST backend reads through (confirmed by instrumenting the request and verifying a token was actually attached before it was rejected, not just repeated 403s). The REST endpoint itself stays live and returns an honest `503 endpoint_unavailable` rather than being deleted, but a tool the model can call and always get a hard failure from is worse than no tool at all, so it is out of the catalog. Use `twitter_user_info_by_id` instead: same user object, one id per call. The catalog is now **61 tools: 40 reads and 21 write actions**.
+- **`twitter_users_by_ids` removed from the tool list.** X refuses the batch `UsersByRestIds` lookup on the read path this package's REST backend uses (confirmed by instrumenting the request and verifying a token was actually attached before it was rejected, not just repeated 403s). The REST endpoint itself stays live and returns an honest `503 endpoint_unavailable` rather than being deleted, but a tool the model can call and always get a hard failure from is worse than no tool at all, so it is out of the catalog. Use `twitter_user_info_by_id` instead: same user object, one id per call. The catalog is now **61 tools: 40 reads and 21 write actions**.
 
 ## 0.6.9 (2026-08-10)
 

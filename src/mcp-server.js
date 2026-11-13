@@ -1,5 +1,7 @@
+import { z } from "zod";
+import { PLAYBOOKS } from "./playbooks.js";
 import { createRequire } from "node:module";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createServer } from "./server.js";
 import { TOOLS } from "./tools.js";
 
 const VERSION = createRequire(import.meta.url)("../package.json").version;
@@ -14,35 +16,17 @@ export const REGISTERED_TOOLS = TOOLS.filter(
   (tool) => !tool.write || ALLOWED_WRITE_TOOLS.has(tool.name),
 );
 
-export function createMcpServer({ callEndpoint, version = VERSION } = {}) {
-  if (typeof callEndpoint !== "function") {
-    throw new TypeError("callEndpoint must be a function");
-  }
-
-  const server = new McpServer({ name: "twitterapis", version });
-
-  for (const tool of REGISTERED_TOOLS) {
-    const method = tool.method || "GET";
-    const annotations = {
-      title: tool.name,
-      readOnlyHint: !tool.write,
-      destructiveHint: Boolean(tool.destructive),
-      openWorldHint: true,
-    };
-    server.registerTool(
-      tool.name,
-      { description: tool.description, inputSchema: tool.shape, annotations },
-      async (args) => callEndpoint(
-        tool.path,
-        args,
-        method,
-        Boolean(tool.jsonBody),
-        tool.pathParams || [],
-      ),
-    );
-  }
-
-  return server;
+export function createMcpServer({ callEndpoint, version = VERSION, ...options } = {}) {
+  return createServer({
+    ...options,
+    version,
+    tools: REGISTERED_TOOLS.map((tool) => tool.name === "twitter_grok_chat"
+      ? { ...tool, shape: { ...tool.shape, messages: z.union([tool.shape.messages, z.string()]).optional() } }
+      : tool),
+    playbooks: PLAYBOOKS.filter((playbook) => !["launch-day-monitor", "competitor-follower-outreach"].includes(playbook.name)),
+    endpointCaller: callEndpoint,
+    instructions: "Live X data is available through this connector. Use read tools for current X posts and profiles. Attachment URLs are not readable by the model; inspect them with twitter_grok_chat only when essential because free-tier Grok is rate-limited. Only session setup, session deletion, login and Grok chat writes are enabled; all other write actions are unavailable.",
+  }).server;
 }
 
 export { VERSION };

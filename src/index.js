@@ -6,7 +6,6 @@ import { resolve } from "node:path";
 import { createAccessAuthenticator } from "./access-auth.js";
 import { createHttpServer } from "./http-server.js";
 import { createMcpServer, REGISTERED_TOOLS } from "./mcp-server.js";
-import { createTwitterApisClient } from "./twitterapis-client.js";
 
 const DEFAULT_HOST = "0.0.0.0";
 const DEFAULT_PORT = 3000;
@@ -22,11 +21,14 @@ function getPort(rawPort) {
 export async function main() {
   const host = process.env.HOST || DEFAULT_HOST;
   const port = getPort(process.env.PORT);
-  const twitterapis = createTwitterApisClient();
   const accessAuthenticator = createAccessAuthenticator();
   const server = createHttpServer({
     accessAuthenticator,
-    mcpServerFactory: () => createMcpServer({ callEndpoint: twitterapis.callEndpoint }),
+    mcpServerFactory: () => createMcpServer({
+      apiKey: process.env.TWITTERAPIS_KEY,
+      baseUrl: process.env.TWITTERAPIS_BASE_URL,
+      timeoutMs: Number(process.env.TWITTERAPIS_TIMEOUT_MS),
+    }),
   });
 
   await new Promise((resolveListen, rejectListen) => {

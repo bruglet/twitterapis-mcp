@@ -192,7 +192,7 @@ try {
     const lists = await Promise.all(clients.map(({ client }) => client.listTools()));
     for (const list of lists) {
       const names = new Set(list.tools.map((tool) => tool.name));
-      assert.equal(list.tools.length, 67, "tools/list exposes 67 approved tools");
+      assert.equal(list.tools.length, REGISTERED_TOOLS.length, "tools/list exposes the approved catalog");
       assert.deepEqual(
         names,
         new Set(REGISTERED_TOOLS.map((tool) => tool.name)),

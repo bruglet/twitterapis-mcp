@@ -81,11 +81,11 @@ The workflow publishes `latest` and `sha-<commit>` for `main`. It also publishes
 
 ## Tools
 
-67 registered tools: 63 reads and 4 allowed write actions. Most user endpoints accept `username` (handle without @) **or** `user_id` (`twitter_user_likes` and `twitter_user_tweets_complete` require `user_id`); tweet endpoints accept `id` **or** `url`; paginated endpoints return a `cursor` you pass back to get the next page. Four of the reads are free account lookups (`twitter_account_me`, `twitter_account_payments`, `twitter_feedback_get`, `twitter_feedback_list`); the read-only monitoring tools are also free.
+75 registered tools: 71 reads and 4 allowed write actions. Most user endpoints accept `username` (handle without @) **or** `user_id` (`twitter_user_likes` and `twitter_user_tweets_complete` require `user_id`); tweet endpoints accept `id` **or** `url`; paginated endpoints return a `cursor` you pass back to get the next page. Four of the reads are free account lookups (`twitter_account_me`, `twitter_account_payments`, `twitter_feedback_get`, `twitter_feedback_list`); the read-only monitoring tools are also free.
 
 Public reads work with your API key. Account-only reads and 4 allowed write actions usually require a linked X session or per-call credentials. The allowed actions are `twitter_grok_chat`, `twitter_customer_session`, `twitter_customer_session_delete`, and `twitter_user_login`.
 
-The complete upstream catalog contains 99 tools. This fork keeps all generated tool definitions, but it does not register the other 32 write actions. MCP clients cannot list or call those tools. The tables below preserve the complete upstream catalog for synchronization and attribution.
+The complete upstream catalog contains 120 tools. This fork keeps all generated tool definitions, but it does not register the other 45 write actions. MCP clients cannot list or call those tools. The tables below preserve the complete upstream catalog for synchronization and attribution.
 
 ### Reads
 
@@ -97,8 +97,11 @@ The complete upstream catalog contains 99 tools. This fork keeps all generated t
 | `twitter_user_info_by_id` | Full profile by numeric user id |
 | `twitter_user_status` | Is an account alive, suspended, or deleted |
 | `twitter_user_about` | A user's structured About object (category, professional/business labels, verification + identity-verification flags, joined date, and X's 'About this account' transparency panel) |
+| `twitter_user_about_batch` | The same About object for up to 100 accounts in one call (usernames or user_ids), billed per account answered; for vetting a list by country or account history |
+| `twitter_audience_summary` | Who an audience is: a country histogram and likely-bot share over a sample of up to 100 followers or retweeters |
 | `twitter_user_affiliates` | Accounts affiliated with an organization profile |
-| `twitter_check_follow_relationship` | Follow relationship between two user ids (who follows whom) |
+| `twitter_check_follow_relationship` | Follow relationship between two accounts, by id or username (who follows whom) |
+| `twitter_check_follow_relationship_batch` | One account against up to 100 others in one call, either direction (which of these accounts follow the brand) |
 | `twitter_user_tweets` | A user's recent original tweets (replies excluded) |
 | `twitter_user_tweets_and_replies` | A user's full timeline (tweets + replies) |
 | `twitter_user_tweets_complete` | A large batch of a user's tweet history per call (see [paging note](#paging-twitter_user_tweets_complete)) |
@@ -113,7 +116,8 @@ The complete upstream catalog contains 99 tools. This fork keeps all generated t
 | `twitter_followers_you_know` | Followers of a target that your authenticated account also follows |
 | `twitter_tweet_detail` | Single tweet: text, author, metrics, media, quoted/reply context |
 | `twitter_tweet_replies` | Replies to a tweet |
-| `twitter_tweet_thread` | Full author thread (connected tweet chain by same author) |
+| `twitter_tweet_replies_complete` | Every reply under a tweet in one call, with an `is_complete` flag and a resume cursor |
+| `twitter_tweet_thread` | Full author thread (connected tweet chain by same author), read forward from the tweet you pass, so pass the thread's first tweet |
 | `twitter_tweet_retweeters` | Accounts that retweeted a tweet |
 | `twitter_tweet_quotes` | Tweets that quote a tweet, with their text. Search-backed, so `count` is what search returned, not the tweet's true `quote_count` |
 | `twitter_list_members` | Members of a Twitter/X List |
@@ -128,7 +132,7 @@ The complete upstream catalog contains 99 tools. This fork keeps all generated t
 | `twitter_bookmark_folders` | Your authenticated account's bookmark folders _(session)_ |
 | `twitter_bookmark_folder_timeline` | Tweets inside one of your bookmark folders, by `folder_id` _(session)_ |
 | `twitter_dm_list` | Your DM conversations (inbox), read-only _(session)_ |
-| `twitter_dm_conversation` | Messages in one DM conversation, read-only _(session)_ |
+| `twitter_dm_conversation` | Messages in one DM conversation, read-only; pass the previous page's `min_entry_id` as `max_id` to page back _(session)_ |
 | `twitter_spaces_info` | Metadata and participant roster for one X Space, live or ended (by Space `id`) |
 | `twitter_community_search` | Find X Communities by keyword; the discovery step that produces the numeric id the rest of the community family needs |
 | `twitter_community_info` | One X Community by numeric id: name, counts, join policy, rules, topic, banners, admin |
@@ -137,13 +141,16 @@ The complete upstream catalog contains 99 tools. This fork keeps all generated t
 | `twitter_community_moderators` | A community's moderators and admins, from its own upstream operation (not a filter over the roster) |
 | `twitter_community_tweets` | A community's post timeline, with the pinned post returned as its own `pinned` field |
 | `twitter_community_memberships` | The inverse lookup: every community a given numeric `user_id` belongs to |
+| `twitter_creator_commentary_video` | Who posts native video about a topic: one search page grouped by author and ranked by video posts, then median and total views, with up to three top post ids per creator |
 | `twitter_grok_chat` | Ask X's own Grok, grounded in live X data, and get the answer plus the sources it cited |
+| `twitter_grok_chat_submit` | Start the same Grok chat as a background job and get a job_id at once, for clients that stop waiting before a long answer |
+| `twitter_grok_chat_result` | Read a submitted Grok chat by job_id: pending, the finished answer, or the error |
 | `twitter_grok_config` | Whether the authenticated account can use Grok, and which models it may pick |
-| `twitter_trends` | Current top trends for a location (by `country` or `woeid`) |
+| `twitter_trends` | Current top trends for a location (by `country` or `woeid`) an X Explore tab (by `category`), or only the trends X labels Business and finance (`category=business_and_finance`) |
 | `twitter_trends_locations` | Every location X has trends for, each with its WOEID |
 | `twitter_account_me` | Your twitterapis.com account: credits, usage, email (free) |
 | `twitter_account_payments` | Your twitterapis.com payment history (free) |
-| `twitter_media_status` | Processing state of an uploaded `media_id`; poll until `succeeded` before attaching video or GIF _(session)_ |
+| `twitter_media_status` | Processing state of an uploaded `media_id`; an uploaded image has no processing step and is usable at once _(session)_ |
 | `twitter_article_get` | Read a **published** article's full content via its announcement tweet id/url (public, no session) |
 | `twitter_article_list` | List your own articles, filtered by `lifecycle` (`draft` or `published`) _(session)_ |
 
@@ -154,23 +161,44 @@ The complete upstream catalog contains 99 tools. This fork keeps all generated t
 | `twitter_create_tweet` | Post a tweet; set `reply_to` to reply or `quote` to quote-tweet |
 | `twitter_delete_tweet` | Delete one of your tweets (irreversible) |
 | `twitter_favorite_tweet` / `twitter_unfavorite_tweet` | Like / unlike a tweet |
+| `twitter_pin_tweet` / `twitter_unpin_tweet` | Pin one of your own tweets to the top of your profile (replaces any existing pinned post) / unpin it |
 | `twitter_retweet` / `twitter_unretweet` | Retweet / undo retweet |
 | `twitter_bookmark_tweet` / `twitter_unbookmark_tweet` | Bookmark / remove bookmark |
-| `twitter_follow_user` / `twitter_unfollow_user` | Follow / unfollow a user by id |
+| `twitter_follow_user` / `twitter_unfollow_user` | Follow / unfollow a user by `user_id` or `username` (exactly one) |
 | `twitter_dm_send` | Send a Direct Message to a user by their numeric `recipient_id` |
 | `twitter_list_create` | Create a Twitter/X List owned by your session (`name`, optional `description` / `is_private`) |
 | `twitter_list_add_member` / `twitter_list_remove_member` | Add / remove one account on a List you own; `member_count` comes back as proof the write landed |
+| `twitter_community_join` / `twitter_community_leave` | Join / leave an X Community by numeric `community_id`. A community that needs moderator approval answers 409 `join_requires_approval` and nothing is submitted; refusals are not billed |
 | `twitter_media_upload` | Upload a base64 image, returns a `media_id` for `twitter_create_tweet` |
+| `twitter_update_profile` | Change your own name, bio, location or link. A PARTIAL update: omitted fields keep their values, an empty string clears one |
+| `twitter_update_avatar` | Replace your own profile picture. Takes base64 image bytes in `image`, not a URL and not a `media_id`. No undo, and X keeps no history |
+| `twitter_update_banner` | Replace your own header image. Takes base64 image bytes in `banner`, not a URL and not a `media_id`. No undo, and X keeps no history |
+
+### Drafts and scheduled posts _(require a linked X session)_
+
+A **draft** is private and never posts. A **scheduled** post **will publish publicly** at its `execute_at` unless you cancel it first. Both lists read only your own account.
+
+| Tool | What it does |
+|---|---|
+| `twitter_draft_create` | Save a private draft on your account; nothing is posted |
+| `twitter_draft_edit` | Replace one draft's contents by `id`; the fields you send become the draft |
+| `twitter_draft_delete` | Delete a draft by `id`; it was never public, so nothing is retracted |
+| `twitter_draft_list` | List your drafts, each with `text` and `thread_truncated` |
+| `twitter_scheduled_create` | Schedule a post for a future `execute_at` in epoch **seconds**, not milliseconds |
+| `twitter_scheduled_delete` | Cancel a pending scheduled post before it sends |
+| `twitter_scheduled_list` | List your pending queue; `execute_at` comes back in epoch seconds |
+
+Both list tools can return `partial: true`, which means X's answer was read but not fully understood. It is **not** the same as an empty list: on a clean read the flag is absent entirely, so an empty array with no `partial` means you genuinely have nothing queued or drafted.
 
 ### Articles _(X's long-form "Notes" feature; writes require a linked X session)_
 
 | Tool | What it does |
 |---|---|
 | `twitter_article_create` | Start a new draft article, returns its `id` |
-| `twitter_article_update_title` | Set a draft or published article's title |
-| `twitter_article_update_cover_media` | Attach an already-uploaded image as an article's cover (`media_id` from `twitter_media_upload`) |
-| `twitter_article_update_content` | Replace a draft or published article's body (Draft.js `content_state` you build) |
-| `twitter_article_publish` | Publish a draft, posting a **real public announcement tweet** (not fully reversible) |
+| `twitter_article_update_title` | Set a draft article's title (a published article answers 422 `article_published`, not billed) |
+| `twitter_article_update_cover_media` | Attach an already-uploaded image as a draft article's cover (`media_id` from `twitter_media_upload`; a published article answers 422 `article_published`, not billed) |
+| `twitter_article_update_content` | Replace a draft article's body (Draft.js `content_state` you build; a published article answers 422 `article_published`, not billed) |
+| `twitter_article_publish` | Publish a draft, posting a **real public announcement tweet** (not fully reversible). Optional `caption` becomes the announcement post's text; `audience` and `reply_control` accept only `Everyone` |
 | `twitter_article_unpublish` | Revert a published article to draft (leaves the announcement tweet up) |
 | `twitter_article_delete` | Delete an article (draft: hard delete; published: unpublish + delete the announcement tweet), irreversible |
 
@@ -215,11 +243,52 @@ Link an X account to your key once, so the account-only reads and write actions 
 | Tool | What it does |
 |---|---|
 | `twitter_customer_session` | Register your x.com session cookies (`auth_token` + `ct0`) against your key |
-| `twitter_customer_session_status` | Read your registered session status without changing it _(session)_ |
+| `twitter_customer_session_status` | Read back the registered session without changing it: resolved account, live/dead status, timestamps, and which egress tier a write would use. Never returns the cookies. Free |
 | `twitter_customer_session_delete` | Revoke that stored session, deleting your `auth_token` + `ct0` from the service. Idempotent and free |
 | `twitter_user_login` | Log in with `username` + `password` (+ `totp_secret` for 2FA); stores the session against your key. Returns a confirmation, never the cookies |
 
-## Upstream attribution
+## Playbooks and provenance
+
+Besides tools, the server exposes MCP **resources**. A client lists them with `resources/list` and fetches one with `resources/read`, so nothing here costs context until it is asked for, and none of it costs credits.
+
+### Playbooks
+
+This fork exposes account audit, account linking, and residential egress playbooks.
+The other upstream playbooks require blocked write tools and remain unavailable.
+
+| URI | What it covers |
+|---|---|
+| `playbook://account-audit` | A reproducible read of one account: identity, output mix, reach, engagement, and which numbers share an observation window |
+| `playbook://link-x-account` | The linking sequence: read the current state, pick a route, the login's timing ceiling, the outcomes that need attention on x.com, and what a session unlocks |
+| `playbook://residential-egress` | Outbound address control: the three places a proxy URL attaches, what a URL has to be, and how to read back which source is in force |
+
+### Provenance
+
+`provenance://tool/{tool_name}` returns, as JSON, where a row you already hold came from: the REST endpoint and method behind it, read or write, whether the call ran as your linked X account or on the API key alone, the per-call price, and the docs URL.
+
+```
+provenance://tool/twitter_advanced_search
+```
+
+```json
+{
+  "tool": "twitter_advanced_search",
+  "endpoint": "GET /twitter/tweet/advanced_search",
+  "kind": "read",
+  "destructive": false,
+  "served_by": "the API key alone (a public read, no linked account)",
+  "cost": "$0.0008 per call",
+  "docs": "https://docs.twitterapis.com/docs/reference/search/tweet-advanced-search"
+}
+```
+
+Row-level upstream provenance (when the service read it from X, whether an upstream cache answered, which account read it) is not in any response this package receives, so it is absent rather than guessed.
+
+### Blocked calls answer with the next steps
+
+A call blocked on a missing key, a rejected key, an empty balance or a missing X session returns a structured payload (in `structuredContent` and appended to the text) carrying an ordered `steps` list, what resolving it `unlocks`, and, for the session case, the playbook URI and the outcomes a retry cannot fix.
+
+## Usage examples
 
 ### Search for trending AI tweets
 
@@ -302,7 +371,17 @@ count: 50
 
 ## Pricing
 
-Calls are billed to your twitterapis.com account. Almost every endpoint is $0.0008/call: all reads (search, profiles, tweets, followers, likes) plus the simple write actions (like, retweet, bookmark, follow and their undos, delete). At the read rate that works out to $0.04 per 1,000 tweets, since each call returns about 20 tweets. The premium endpoints cost a little more: tweet creation, sending a DM (`twitter_dm_send`), and DM reads (`twitter_dm_list`, `twitter_dm_conversation`) at $0.0016/call, full tweet history (`twitter_user_tweets_complete`) at $0.0024/call, a full tweet thread (`twitter_tweet_thread`) and a Grok answer (`twitter_grok_chat`) at $0.004/call, and the article-editing writes (`twitter_article_create`, `twitter_article_update_title`, `twitter_article_update_cover_media`, `twitter_article_update_content`, `twitter_article_publish`, `twitter_article_unpublish`) at $0.0016/call (`twitter_article_get`, `twitter_article_list`, and `twitter_article_delete` stay at the standard $0.0008/call). Your first $0.50 is free. See [twitterapis.com/pricing](https://www.twitterapis.com/pricing).
+Calls are billed to your twitterapis.com account, at the price each tool's description states. The standard rate is $0.0008 per call: nearly every read (search, profiles, timelines, followers, likes, lists, bookmarks, articles) and the simple write actions (like, pin, retweet, bookmark, follow, list membership and their undos, delete). At that rate 1,000 tweets cost about $0.04, since a call returns about 20 tweets. The account, feedback and monitoring tools are free, and so is registering, checking or revoking a session from your own cookies. Checking Grok eligibility with `twitter_grok_config` is free too. Every tool priced differently from the standard rate:
+
+| Price | Tools |
+|---|---|
+| $0.0008 per billed item | `twitter_user_about_batch` (per account answered, so one 100-account call costs up to $0.08), `twitter_check_follow_relationship_batch` (per pair answered), `twitter_audience_summary` (per sample page plus per sampled account answered) |
+| $0.0016 per call | Posting: `twitter_create_tweet`, `twitter_list_create`. DMs: `twitter_dm_send`, `twitter_dm_list`, `twitter_dm_conversation`. Profile: `twitter_update_profile`, `twitter_update_avatar`, `twitter_update_banner`. Drafts and scheduled posts, the two list reads included: `twitter_draft_create`, `twitter_draft_edit`, `twitter_draft_list`, `twitter_scheduled_create`, `twitter_scheduled_list`. Article edits: `twitter_article_create`, `twitter_article_update_title`, `twitter_article_update_cover_media`, `twitter_article_update_content`, `twitter_article_publish`, `twitter_article_unpublish` |
+| $0.0024 per call | `twitter_user_tweets_complete`, `twitter_tweet_replies_complete` (flat per call, however many tweets or pages come back) |
+| $0.004 per call | `twitter_tweet_thread`, `twitter_grok_chat` |
+| $0.01 per call | `twitter_user_login` (logging in with a username and password) |
+
+`twitter_grok_chat_submit` and `twitter_grok_chat_result` are free calls. The Grok chat price is charged once, on the poll that first delivers the finished answer, and a job that fails or is never collected costs nothing. Deleting a draft or a scheduled post, and reading, listing or deleting an article, stay at the standard $0.0008 per call. Your first $0.50 is free. See [twitterapis.com/pricing](https://www.twitterapis.com/pricing).
 
 ## Links
 
@@ -315,7 +394,7 @@ Calls are billed to your twitterapis.com account. Almost every endpoint is $0.00
 
 **Do I need an X (Twitter) developer account?** No. Get an API key at [twitterapis.com/signup](https://www.twitterapis.com/signup); there is no application or approval step.
 
-**Is it read-only?** It exposes 63 read tools and the four approved actions listed above. The other 32 upstream write actions are not registered.
+**Is it read-only?** It exposes 71 read tools and the four approved actions listed above. The other 32 upstream write actions are not registered.
 
 **Which clients are supported?** Claude Desktop, Cursor, Windsurf, and VS Code (Copilot agent mode), or any Model Context Protocol client.
 
@@ -345,3 +424,5 @@ npm test                  # gates, incl. "src/tools.js matches the generator"
 ## License
 
 MIT
+
+The fork accepts Grok history as an array or a JSON-encoded array for compatibility with older clients.

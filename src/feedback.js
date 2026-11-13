@@ -9,8 +9,9 @@
 // and sends nothing; "list" shows the drafts; "send" posts ONLY the ids the user
 // named to POST /feedback (free, not metered); "discard" drops them.
 //
-// The tool DESCRIPTION in scripts/tools.overrides.mjs is the product: it names
-// the trigger moments and the four-bullet format. This file enforces the same
+// The SERVER INSTRUCTIONS (INSTRUCTIONS in src/server.js) name the trigger moments
+// and the three-bullet format; the tool description states only what the tool does,
+// because a directory-listed description may not instruct the model. This file enforces the same
 // rules mechanically so a draft that reaches the server is well-formed, and it
 // auto-attaches the evidence the server already holds (the last failing call,
 // the client name from the MCP handshake, this package's version), so the model
@@ -204,7 +205,7 @@ export function createFeedbackHandler({ callEndpoint, version, getClientInfo, ge
       const title = String(args.title ?? "").trim();
       if (!title || title.length > MAX.title) return text(`title is required for a draft, at most ${MAX.title} characters.`, true);
       const details = String(args.details ?? "").trim();
-      if (!details || details.length > MAX.details) return text(`details is required for a draft, at most ${MAX.details} characters. Use the four labelled bullets: What happened, What the user said, Repro, Evidence.`, true);
+      if (!details || details.length > MAX.details) return text(`details is required for a draft, at most ${MAX.details} characters. Use the three labelled bullets: What happened, Repro, Evidence.`, true);
       const area = args.area ? String(args.area).trim().slice(0, MAX.area) : undefined;
 
       const client = clientString(getClientInfo?.(), version);

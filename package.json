@@ -1,7 +1,7 @@
 {
   "name": "@twitterapis/mcp",
   "mcpName": "io.github.TwitterAPIs/twitterapis-mcp",
-  "version": "0.9.8",
+  "version": "0.28.1",
   "private": true,
   "description": "Remote MCP server for twitterapis.com with read tools, X session setup, and Grok chat.",
   "repository": {
@@ -18,7 +18,7 @@
     "build": "node scripts/gen-tools.mjs --write",
     "build:check": "node scripts/gen-tools.mjs --check",
     "openapi:refresh": "node scripts/openapi-refresh.mjs",
-    "test": "node scripts/gen-tools.mjs --check && node test/gen-tools-endpoints.mjs && node test/catalog-identity.mjs && node test/tools.test.mjs && node test/feedback.test.mjs && node test/hint-for.test.mjs && node test/smoke.mjs && node test/openapi-parity.mjs && node test/body-mode-parity.mjs && node test/readme-parity.mjs",
+    "test": "node scripts/gen-tools.mjs --check && node test/gen-tools-endpoints.mjs && node test/catalog-identity.mjs && node test/tools.test.mjs && node test/feedback.test.mjs && node test/hint-for.test.mjs && node test/smoke.mjs && node test/openapi-parity.mjs && node test/body-mode-parity.mjs && node test/readme-parity.mjs && node test/annotations.test.mjs && node test/snapshot-redaction.mjs && node test/per-caller-state.test.mjs && node scripts/__tests__/reconcile-mcp-publish-chain.test.mjs && node test/paywall.test.mjs && node test/playbooks.test.mjs && node test/retry.test.mjs && node test/inline-credentials.test.mjs && node test/description-compliance.mjs && node test/proxy-url-egress.test.mjs && node test/sourcing-disclosure.mjs --selftest && node test/sourcing-disclosure.mjs && node test/fork-contract.test.mjs && node test/readme-prices.mjs && node test/readme-prices.redtest.mjs",
     "check:openapi-parity": "node test/openapi-parity.mjs",
     "check:body-mode-parity": "node test/body-mode-parity.mjs"
   },

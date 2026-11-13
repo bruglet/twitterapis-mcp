@@ -1,5 +1,6 @@
 // Unit tests for the tool catalog + query builder. No network, no SDK server.
 import { TOOLS, buildQuery, resolvePathParams, MissingPathParamError } from "../src/tools.js";
+import { readFileSync } from "node:fs";
 
 let pass = 0, fail = 0;
 const check = (name, cond) => { if (cond) { pass++; } else { fail++; console.error("  FAIL:", name); } };
@@ -44,9 +45,43 @@ const writes = TOOLS.filter((t) => t.write);
 // Bumped 98 -> 99 on 2026-09-05 with twitter_feedback_list (GET /feedback), which
 // the API shipped after 0.9.7 and which no tool covered: 99 endpoints, 63 reads
 // and 36 writes, still exact parity.
-const EXPECTED_TOOLS = 99;
-const EXPECTED_READS = 63;
-const EXPECTED_WRITES = 36;
+// Bumped 99 -> 106 on 2026-09-13 with the seven compose tools (#123): five writes
+// (draft create/edit/delete, scheduled create/delete) and two reads (draft/list,
+// scheduled/list). The API had shipped them dark behind two env flags, verified
+// them end to end against a real customer session, then published them and removed
+// the flags. 106 endpoints, 65 reads and 41 writes, still exact parity.
+// Bumped 106 -> 107 on 2026-09-13 with twitter_update_profile (#105), the one of
+// the three profile writes that had been called end to end through the running
+// service. Its two siblings stayed UNPUBLISHED because they need a real image
+// upload, so their upstream host was an inference from update_profile's capture
+// rather than an observation.
+//
+// Bumped 107 -> 109 later the same day (#142) with twitter_update_avatar and
+// twitter_update_banner. The inference is now an OBSERVATION: both were called
+// against a live account, both SUCCESS envelopes are captured in the API repo,
+// and each write was confirmed applied by reading the profile back through
+// GraphQL UserByScreenName. PROFILE_WRITES_ENABLED is deleted from the API
+// entirely, so the note below about an unadvertised-but-reachable route no
+// longer describes anything: there is no flag left to turn off, and all three
+// paths are published on every surface.
+//
+// The note is kept rather than deleted because the SHAPE it records is the
+// reusable part: UNPUBLISHED IS NOT THE SAME AS UNREACHABLE. A route absent
+// from every published surface is still served by the router, so a caller who
+// guesses the URL reaches it, and "we have not documented it" is not a control.
+// An adversarial review of the 0.11.1 release caught exactly that gap. Whenever
+// this package claims exact parity, the claim is about what is ADVERTISED; ask
+// separately what the router still answers.
+// 109 endpoints, 65 reads and 44 writes, still exact parity.
+// 2026-10-01 (#45): twitter_user_about_batch, a read. 110 endpoints, 66 reads, 44 writes.
+// 2026-10-01 (#45 parts 2-3): follow batch + audience summary, two reads. 112, 68, 44.
+// 2026-10-15: twitter_tweet_replies_complete, one read. 113, 69, 44.
+// 2026-10-20 (#206, backend #667): twitter_creator_commentary_video, a read, and
+// twitter_community_join / twitter_community_leave, two writes. 116, 70, 46.
+// 2026-11-05: twitter_pin_tweet and twitter_unpin_tweet, two writes. 120, 71, 49.
+const EXPECTED_TOOLS = 120;
+const EXPECTED_READS = 71;
+const EXPECTED_WRITES = 49;
 check(`${EXPECTED_TOOLS} tools (got ${TOOLS.length})`, TOOLS.length === EXPECTED_TOOLS);
 check(`${EXPECTED_READS} reads (got ${reads.length})`, reads.length === EXPECTED_READS);
 check(`${EXPECTED_WRITES} writes (got ${writes.length})`, writes.length === EXPECTED_WRITES);
@@ -105,6 +140,26 @@ const JSON_BODY_WRITES = [
   // limit from the body only, so without jsonBody every call would go out as a
   // query string and 400, the same live failure the five tools above hit.
   "twitter_monitor_webhook_redrive",
+  // Added 2026-09-13 (#105). The backend's route-body-modes.json classifies
+  // updateProfileRoute "json-only", so body-mode-parity refuses the build unless
+  // the tool sets jsonBody. That classification is CONSERVATIVE rather than
+  // exact: the handler reads every field as `body.X ?? c.req.query("X")`, so a
+  // query string would work too, but it uses a raw c.req.query() instead of the
+  // param-compat helpers the classifier recognises. The error is in the safe
+  // direction, since it forces the mode that always works.
+  "twitter_update_profile",
+  // Added 2026-09-13 (#142). Both are classified "json-only" in the backend's
+  // route-body-modes.json like their update_profile sibling, but for these two
+  // the classification is EXACT rather than conservative: the shared imageWrite
+  // handler reads c.req.json() and nothing else, with no query fallback at all.
+  // A query string genuinely cannot work here, so jsonBody is load-bearing
+  // rather than merely safe.
+  "twitter_update_avatar",
+  "twitter_update_banner",
+  // parseGrokChatRequest reads messages only from a parsed body
+  // (Array.isArray(body.messages)), so the query string drops it silently.
+  "twitter_grok_chat",
+  "twitter_grok_chat_submit",
 ];
 check("json-body writes present: POST + write + jsonBody", JSON_BODY_WRITES.every((n) => {
   const t = TOOLS.find((x) => x.name === n);
@@ -137,14 +192,32 @@ check("list/tweets is the filterable (search-backed) feed", (() => {
   const t = TOOLS.find((x) => x.name === "twitter_list_tweets");
   return t && ["list_id", "since", "until", "include_replies", "count", "cursor"].every((a) => a in t.shape);
 })());
-check("list/timeline takes NO filters, only list_id + paging", (() => {
+check("list/timeline takes NO search filters, only list_id + paging (+ the shared projection args and the paid_promotion response filter every tweet-list read carries)", (() => {
   const t = TOOLS.find((x) => x.name === "twitter_list_timeline");
-  return t && JSON.stringify(Object.keys(t.shape)) === JSON.stringify(["list_id", "count", "cursor"]);
+  return t && JSON.stringify(Object.keys(t.shape)) === JSON.stringify(["list_id", "count", "cursor", "fields", "compact", "paid_promotion"]);
 })());
 check("list writes are POST writes on the customer's own session (inline creds exposed)", ["twitter_list_add_member", "twitter_list_remove_member", "twitter_list_create"].every((n) => {
   const t = TOOLS.find((x) => x.name === n);
   return t && t.method === "POST" && t.write === true && !t.jsonBody && t.shape.auth_token && t.shape.ct0;
 }));
+// Community join/leave (#206): POST writes on the customer's own session, the
+// backend reads community_id query-or-body (route-body-modes "either"), and
+// leave is the destructive half of the pair.
+check("community join/leave are POST writes on the customer's own session (inline creds exposed, community_id only)", ["twitter_community_join", "twitter_community_leave"].every((n) => {
+  const t = TOOLS.find((x) => x.name === n);
+  return t && t.method === "POST" && t.write === true && !t.jsonBody && t.shape.auth_token && t.shape.ct0
+    && JSON.stringify(Object.keys(t.shape)) === JSON.stringify(["community_id", "auth_token", "ct0", "proxy_url", "user_agent"])
+    && Boolean(t.destructive) === (n === "twitter_community_leave");
+}));
+check("creator/commentary_video is a GET read: query required, product Top|Latest, count 1..20, no session args", (() => {
+  const t = TOOLS.find((x) => x.name === "twitter_creator_commentary_video");
+  if (!t || t.write || t.method || t.headerArgs) return false;
+  const s = t.shape;
+  return !s.query.isOptional() && s.query.safeParse("").success === false
+    && s.product.safeParse("Latest").success && !s.product.safeParse("Media").success
+    && s.count.safeParse(20).success && !s.count.safeParse(21).success
+    && s.min_views.safeParse(0).success && !s.min_views.safeParse(-1).success;
+})());
 
 // Monitoring family (task #14/#488): the first tools in this catalog that carry
 // a REST path parameter (/monitor/{id}, /webhook/{id}, /webhook/{id}/test) and
@@ -254,6 +327,53 @@ check("tweets_complete documents next_cursor as the completion signal", /next_cu
 check("tweets_complete warns the response can be truncated", /truncat/i.test(C_DESC));
 check("tweets_complete documents flat per-call billing", /per CALL/i.test(C_DESC));
 check("no tool promises a full history in one call", !TOOLS.some((t) => /full back-catalogue in one call|near-complete/i.test(t.description || "")));
+
+// The server instructions ask for a rare-term control before an "ignored
+// parameter" report: a generic query on a score-ordered sort returns the global
+// listing, which reads exactly like a dropped parameter and is not one.
+// Checked on the exported value the server actually sends, not on a source
+// file, so moving the text between files cannot fool it.
+const { INSTRUCTIONS: INDEX_SRC } = await import("../src/server.js");
+check("instructions ask for a distinctive-value control before an ignored-parameter report", /re-run the call with a distinctive value that could only match if the parameter was honoured/.test(INDEX_SRC));
+check("instructions say to retitle the report by what the control showed", /title it that way and say what the control showed/.test(INDEX_SRC));
+
+// Async Grok (live 2026-11-04). submit takes the body grok/chat takes, because the
+// API parses both with one function; result is a key-scoped read with no session.
+const GROK = TOOLS.find((t) => t.name === "twitter_grok_chat");
+const GROK_SUBMIT = TOOLS.find((t) => t.name === "twitter_grok_chat_submit");
+const GROK_RESULT = TOOLS.find((t) => t.name === "twitter_grok_chat_result");
+check("grok submit is POST /twitter/grok/chat/submit", GROK_SUBMIT?.path === "/twitter/grok/chat/submit" && GROK_SUBMIT?.method === "POST");
+check("grok submit takes exactly the grok chat arguments", JSON.stringify(Object.keys(GROK_SUBMIT?.shape || {})) === JSON.stringify(Object.keys(GROK?.shape || {})));
+check("grok result is a GET read taking job_id and fields only", GROK_RESULT?.path === "/twitter/grok/chat/result" && !GROK_RESULT?.write && !GROK_RESULT?.method
+  && JSON.stringify(Object.keys(GROK_RESULT?.shape || {})) === JSON.stringify(["job_id", "fields"]));
+check("grok result requires job_id", GROK_RESULT?.shape?.job_id?.isOptional?.() === false);
+check("both grok job calls are free and name the single delivery charge", [GROK_SUBMIT, GROK_RESULT].every((t) => /Cost: Free per call\./.test(t?.description || "") && /\$0\.004 Grok chat price is charged once/.test(t?.description || "")));
+for (const t of [GROK, GROK_SUBMIT]) {
+  check(`${t?.name} messages is a real array of turns`, t?.shape?.messages?.safeParse?.([{ role: "user", content: "hi" }]).success === true);
+  check(`${t?.name} messages refuses a JSON-encoded string`, t?.shape?.messages?.safeParse?.("[]").success === false);
+}
+{
+  const { createServer, hintFor } = await import("../src/server.js");
+  const sent = [];
+  const fetchImpl = async (url, init) => { sent.push({ url: String(url), init }); return new Response('{"job_id":"j","status":"pending"}', { status: 202 }); };
+  const tools = createServer({ apiKey: "k", fetchImpl, retryDelaysMs: [] }).server._registeredTools;
+  const turns = [{ role: "user", content: "first" }, { role: "assistant", content: "second" }, { role: "user", content: "third" }];
+  const res = await tools.twitter_grok_chat_submit.handler({ messages: turns, mode: "fast" }, {});
+  const body = JSON.parse(sent[0]?.init?.body || "{}");
+  check("grok submit sends messages as an array in the JSON body, not the URL", sent.length === 1 && !sent[0].url.includes("?") && JSON.stringify(body.messages) === JSON.stringify(turns));
+  check("a 202 pending job comes back as a result, not an error", !res?.isError && /pending/.test(res?.content?.[0]?.text || ""));
+  check("an unknown grok job gets its own 404 hint", /job_id/.test(hintFor(404, "/twitter/grok/chat/result")));
+}
+
+// Every pinned spec path has to exist in the snapshot, or a refresh or a parity
+// run dies on it; the pin is what keeps grok/config's corrected free price.
+{
+  const { LEAD_PATHS } = await import("../scripts/openapi-lead.mjs");
+  const { readFileSync } = await import("node:fs");
+  const snap = JSON.parse(readFileSync(new URL("./openapi.snapshot.json", import.meta.url), "utf8"));
+  check("every LEAD_PATHS entry is in the snapshot", LEAD_PATHS.length > 0 && LEAD_PATHS.every((p) => snap.paths[p]));
+  check("the snapshot keeps grok/config free", snap.paths["/grok/config"]?.get?.["x-cost-usd"] === 0);
+}
 
 console.log(`tools.test: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
